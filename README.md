@@ -3,6 +3,10 @@ Audio and Music Processing Challenge Template
 
 This provides two Python scripts that may serve as a template for your submission to the onset detection, beat detection and tempo estimation challenges. Usage is completely optional.
 
+Environment set up
+-------------
+´´´pip install -r requirements.txt´´´
+
 `detector.py`
 -------------
 
