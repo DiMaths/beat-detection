@@ -28,10 +28,6 @@ Use it to evaluate your predictions on training sets. It should gracefully handl
 
 Suggested use
 -------------
-
-The idea would be for you to predict and evaluate on the training set, changing the implementation and tuning parameters as you go (think about setting aside a part of the training set for validation, especially if you are using machine learning approaches). When happy, run the prediction script over the test set and submit the resulting `.json` file to the challenge server.
-
-For reference, running `detector.py` over the full training set (extracted to `train/`) and evaluating the results should look like this:
 ```
 $ ./detector.py train/ output.json
 $ ./evaluate.py train/ output.json
@@ -39,3 +35,4 @@ Onsets F-score: x.xxx
 Tempo p-score: x.xxx
 Beats F-score: x.xxx
 ```
+    

@@ -21,6 +21,9 @@ import tqdm
 
 import matplotlib.pyplot as plt
 
+from central_avg_envlope import moving_central_average
+from util import sliding_max
+
 def opts_parser():
     usage =\
 """
@@ -36,6 +39,22 @@ Detects onsets, beats and tempo in WAV files.
     parser.add_argument('--plot',
             action='store_true',
             help='If given, plot something for every file processed.')
+    parser.add_argument('--method', 
+            type=str, 
+            default="central_avg_envelope",
+            help="Specifies the method to uses")
+    parser.add_argument('--avg_window_size',
+            type=int,
+            default=50,
+            help="Relevant only for method='central_avg_envelope', size of sliding window")
+    parser.add_argument('--gauss_smooth',
+            type=bool,
+            action='store_true',
+            help="Relevant only for method='central_avg_envelope', if given, apply not simple avg, but weighted")
+    parser.add_argument('--sliding_max_window_size',
+            type=int,
+            default=150,
+            help="Used for selecting picks of onset detection function as onsets")
     return parser
 
 
@@ -111,55 +130,6 @@ def detect_everything(filename, options):
             'tempo': list(np.round(tempo, 2))}
 
 
-def moving_central_average(x: np.ndarray, w: int, mode: str = 'same', gaussian_smoothing: bool = False) -> np.ndarray:
-    """
-    Computes moving average of sequence x with window size w
-    @param x: np.ndarray
-    @param w: int - window size
-    @param mode: str 
-        - if 'same' then returns same length array by adding zeros to ends
-        - if 'valid' return array of length (len(x) - w + 1)
-    @param gaussian_smoothing: bool 
-        - if True weights are taken from normal distribution pdf
-    """
-    if mode not in ["same", "valid"]:
-        raise ValueError("Wrong mode of moving central averaging, allowed are 'same' and 'valid'.")
-    if w <= 0:
-        raise ValueError(f"Window size for moving central average must be positive integer, but got {w}.") 
-    
-    weights = np.ones(w)
-    if gaussian_smoothing:
-        eq_points = np.linspace(0, 1, num=w+2)[1:]
-        weights = [(2*np.pi)**(-0.5) * np.exp(-0.5 * point**2) for point in eq_points]
-        max_weight = max(weights)
-        weights = [w/max_weight for w in weights]
-
-    return np.convolve(x, weights, mode) / sum(weights)
-
-def sliding_max(x: np.ndarray, w: int) -> np.ndarray:
-    """
-    Computes sliding max (max in sliding window)
-    @param x: np.ndarray - original sequence
-    @param w: int - size of the sliding window
-
-    @returns y: np.ndarray - array of the same size as x
-    """
-    if w <= 0:
-        raise ValueError(f"Window size must be positive integer, but got {w}.")
-
-    # y is copy of x plus padded 0s
-    y = np.zeros(x.shape[0] + w - 1)
-    w_half = int(w/2)
-    y[w_half:-(w-w_half-1)] = x  
-
-    # recursive implementation allows O(len(x) * log(w)) complexity 
-    # instead of O(len(x) * w)
-    current_w = 1
-    while current_w < w:
-        step = min(current_w, w-current_w)
-        y = np.maximum(y[step:], y[:-step])
-        current_w += step
-    return y
 
 def onset_detection_function(sample_rate, signal, fps, spect, magspect,
                              melspect, options):
@@ -168,15 +138,17 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     where the onsets are. Returns the function values and its sample/frame
     rate in values per second as a tuple: (values, values_per_second)
     """
-
-    values = moving_central_average(np.abs(signal), 50, gaussian_smoothing=True)[::50]
+    if options.method == "central_avg_envelope":
+        values = moving_central_average(np.abs(signal),
+                                        options.avg_window_size, 
+                                        gaussian_smoothing=options.gauss_smooth)[::options.avg_window_size]
     """
     plt.plot(np.abs(signal), label="original magnitude")
-    plt.plot(np.arange(0,len(signal),50), values, label="moving average")
+    plt.plot(np.arange(0,len(signal),options.avg_window_size), values, label="moving average")
     plt.legend()
     plt.show()
     """
-    values_per_second = sample_rate / 50
+    values_per_second = sample_rate / options.avg_window_size
     return values, values_per_second
 
 
@@ -185,7 +157,7 @@ def detect_onsets(odf_rate, odf, options):
     Detect onsets in the onset detection function.
     Returns the positions in seconds.
     """
-    local_maximas = np.where(sliding_max(odf, 150) == odf)[0]
+    local_maximas = np.where(sliding_max(odf, options.sliding_max_window_size) == odf)[0]
     
     """plt.plot(sliding_max(odf, 5_000), label="sliding max")
     plt.plot(odf, label="onset detection function")
