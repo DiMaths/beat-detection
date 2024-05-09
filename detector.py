@@ -6,7 +6,7 @@ Detects onsets, beats and tempo in WAV files.
 
 For usage information, call with --help.
 
-Author: Jan Schlüter
+Author of the skeleton: Jan Schlüter
 """
 
 import sys
@@ -38,9 +38,10 @@ Detects onsets, beats and tempo in WAV files.
     parser.add_argument('outfile',
                         type=str,
                         help='Output JSON file to write.')
-    parser.add_argument('--plot',
-                        action='store_true',
-                        help='If given, plot something for every file processed.')
+    parser.add_argument('--plot_lvl',
+                        type=int,
+                        default=0,
+                        help='Debugging plots during the run, higher lvl -> more extra plots')
     parser.add_argument('--method',
                         type=str,
                         default="central_avg_envelope",
@@ -121,7 +122,7 @@ def detect_everything(filename, options):
         odf_rate, odf, onsets, tempo, options)
 
     # plot some things for easier debugging, if asked for it
-    if options.plot:
+    if options.plot_lvl > 0:
         fig, axes = plt.subplots(3, sharex=True)
         plt.subplots_adjust(hspace=0.3)
         plt.suptitle(filename)
@@ -157,18 +158,10 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
         values = moving_central_average(np.abs(signal),
                                         options.avg_window_size,
                                         gaussian_smoothing=options.gauss_smooth)[::subsampling_factor]
-        """
-        plt.plot(np.abs(signal), label="original magnitude")
-        plt.plot(np.arange(0,len(signal),options.avg_window_size), values, label="moving average")
-        plt.legend()
-        plt.show()
-        """
+    
     elif options.method == "spectral_diff":
         subsampling_factor = sample_rate // fps 
         values = spectral_diff(spect, options.p_norm, options.positive_only)
-        """plt.plot(values, label="values")
-        plt.legend()
-        plt.show()"""
 
     values_per_second = sample_rate / subsampling_factor
     return values, values_per_second
@@ -181,17 +174,16 @@ def detect_onsets(odf_rate, odf, options):
     """
     spikes = relative_spikes(odf, options.sliding_max_window_size, options.min_rel_jump)
 
-    """
-    plt.plot(sliding_max(odf, options.sliding_max_window_size), label="sliding max")
-    plt.plot(sliding_min(odf, options.sliding_max_window_size), label="sliding min")
-    
-    plt.plot(odf, label="onset detection function")
-    plt.plot(spikes, odf[spikes], 'o', label="onset detection function")
-    all_local_maximas = relative_spikes(odf, options.sliding_max_window_size, 0.0)
-    plt.plot(all_local_maximas, odf[all_local_maximas], 'x', label="local_maximas")
-    plt.legend()
-    plt.show()
-    """
+    if options.plot_lvl > 1:
+        plt.plot(sliding_max(odf, options.sliding_max_window_size), label="sliding max")
+        plt.plot(sliding_min(odf, options.sliding_max_window_size), label="sliding min")
+        
+        plt.plot(odf, label="onset detection function")
+        plt.plot(spikes, odf[spikes], 'o', label="onsets")
+        all_local_maximas = relative_spikes(odf, options.sliding_max_window_size, 0.0)
+        plt.plot(all_local_maximas, odf[all_local_maximas], 'x', label="local_maximas")
+        plt.legend()
+        plt.show()
 
     return spikes / odf_rate
 
@@ -202,17 +194,14 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
     Detect tempo using any of the input representations.
     Returns one tempo or two tempo estimations.
     """
-    # tempo = 60 / (onsets[1] - onsets[0]) # old dummy placeholder
-    # plt.hist(np.diff(onsets))
-    # plt.show()
-
     differences = np.diff(onsets)
     diffs_in_range = differences[(0.25 <= differences) & (differences <= 0.5)]
     if len(diffs_in_range) > 0:
         mean_diff_in_range = diffs_in_range.mean()
     else:
-        """plt.hist(differences)
-        plt.show()"""
+        if options.plot_lvl > 1:
+            plt.hist(differences)
+            plt.show()
         mean_diff_in_range = differences.mean()
         
     tempo = 60 / mean_diff_in_range
@@ -226,11 +215,7 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     Detect beats using any of the input representations.
     Returns the positions of all beats in seconds.
     """
-    """current = onsets[1]
-    beats = [current]
-    while current <= onsets[-1]:
-        current += tempo[0]/60
-        beats.append(current)"""
+
     beats = onsets
     return beats
 
