@@ -50,7 +50,7 @@ def sliding_min(x: np.ndarray, w: int) -> np.ndarray:
         current_w += step
     return y
 
-def relative_spikes(x: np.ndarray, w: int, min_rel_jump: float) -> np.ndarray:
+def relative_spikes(x: np.ndarray, w: int, min_rel_jump: float, debug_plot: bool = False) -> np.ndarray:
     """
     Computes local maximas which is relatively high enough to be spikes
     @param x: np.ndarray - original sequence
@@ -60,9 +60,19 @@ def relative_spikes(x: np.ndarray, w: int, min_rel_jump: float) -> np.ndarray:
 
     @returns spikes: np.ndarray - array of the same size as x
     """
+    # normalize to [0,1] scale 
+    x -= np.min(x[x > 0])
+    x /= np.max(x)
+    x[x < 0] = 0
     slide_max = sliding_max(x, w)
     slide_min = sliding_min(x, w)
     relative_jumps = np.array([(slide_max[i] / slide_min[i]) - 1 if slide_min[i] > 0 else float('inf') for i in range(len(x))], dtype=float)
+    if debug_plot:
+        import matplotlib.pyplot as plt
+        plt.plot(relative_jumps, 'r')
+        plt.hlines(min_rel_jump, 0, len(relative_jumps), 'b')
+        plt.yscale('log')
+        plt.show()
     local_maximas = np.where(slide_max == x)[0]
     possible_jumps = np.where(relative_jumps > min_rel_jump)[0]
     spikes = np.intersect1d(local_maximas, possible_jumps)
