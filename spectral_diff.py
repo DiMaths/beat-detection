@@ -12,10 +12,12 @@ def spectral_diff(X: np.ndarray, p_norm: int = 2, positive_only: bool = False) -
 
     @returns diff: np.ndarray - norm(X[t] - X[t-1])
     """
+
     X_log = np.log10(1 + 10 * np.abs(X))
     X_delayed = np.zeros_like(X_log)
     X_delayed[:, 1:] = X_log[:, :-1].copy()
     diff = X_log - X_delayed
+
     if positive_only:
         diff = diff + np.abs(diff)
         diff /= 2

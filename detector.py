@@ -172,6 +172,7 @@ def detect_onsets(odf_rate, odf, options):
     Detect onsets in the onset detection function.
     Returns the positions in seconds.
     """
+
     spikes = relative_spikes(odf, 
                              options.sliding_max_window_size, 
                              options.min_rel_jump, options.plot_lvl > 2)
@@ -198,6 +199,9 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
     """
     differences = np.diff(onsets)
 
+    if options.plot_lvl > 2:
+            plt.hist(differences)
+            plt.show()
     estimates = []
     for p in range(-3, 3):
         for base in [2,3,5,7]:
@@ -214,6 +218,7 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
                 estimates.append(est)
     
     tempo = 60 / np.median(estimates)
+
 
     return [tempo / 2, tempo]
 
