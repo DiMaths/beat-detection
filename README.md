@@ -1,4 +1,4 @@
-Audio and Music Processing Challenge Repo (based on template)
+Audio and Music Processing Challenge Repo
 =============================================
 Environment set up
 -------------
@@ -9,27 +9,28 @@ $ pip install -r requirements.txt
 `detector.py`
 -------------
 
-Takes two arguments: A directory of `.wav` files to process, and the file name of a `.json` file to write the predictions to. Optionally takes the `--plot` argument to visualize computed features and predictions for each file as they are processed.
+Needs two arguments: a directory of `.wav` files to process and the file name of a `.json` file to write the predictions to. 
 
-Requires `numpy`, `scipy`, `librosa`, optionally `tqdm` for a progress bar, and optionally `matplotlib` for the visualization.
+Options:
 
-`detect_everything()` computes a spectrogram and mel spectrogram, and then calls other functions to derive an onset detection function, detect onsets, estimate tempo, and detect beats. 
+`--plot_lvl` takes an integer value
+if > 0, then visualizes computed features and predictions for each file as they are processed.
+if > 1, produces extra plots of odf and its peaks (aka onsets) selection process.
 
-All functions have access to the command line parameters, so you can add parameters that you would like to alter from the command line or allow selecting different algorithms.
+`--method` takes str value
+Possible methods are 'central_avg_envelope'(default value) and 'spectral_diff'.
+
+For details on other options run `./detector.py --help`.
 
 `evaluate.py`
 -------------
 
-Takes two arguments: The location of the ground truth and the location of the predictions. The ground truth can be a directory of `.onsets.gt`, `.tempo.gt` and `.beats.gt` files or a `.json` file. The predictions can be a directory of `.onsets.pr`, `.tempo.pr` and `.beats.pr` files or a `.json` file.
-
-Requires `numpy` and `mir_eval` to run.
-
-Use it to evaluate your predictions on training sets. It should gracefully handle cases where not all three tasks are included in the ground truth or predictions. Beware that scores are always averaged over the number of ground truth files, no matter whether there is a corresponding prediction.
+Takes two arguments: path to the ground truth and to the predictions. Each can be a directory of `.onsets.gt`, `.tempo.gt` and `.beats.gt` files or a `.json` file.
 
 Suggested use
 -------------
 ```
-$ ./detector.py train/ output.json
+$ ./detector.py train/ output.json --method method_name
 $ ./evaluate.py train/ output.json
 Onsets F-score: x.xxx
 Tempo p-score: x.xxx
