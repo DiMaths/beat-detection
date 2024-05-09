@@ -22,39 +22,53 @@ import tqdm
 import matplotlib.pyplot as plt
 
 from central_avg_envlope import moving_central_average
-from util import sliding_max
+from spectral_diff import spectral_diff
+from util import sliding_max, sliding_min, relative_spikes
+
 
 def opts_parser():
-    usage =\
-"""
+    usage = \
+        """
 Detects onsets, beats and tempo in WAV files.
 """
     parser = ArgumentParser(description=usage)
     parser.add_argument('indir',
-            type=str,
-            help='Directory of WAV files to process.')
+                        type=str,
+                        help='Directory of WAV files to process.')
     parser.add_argument('outfile',
-            type=str,
-            help='Output JSON file to write.')
+                        type=str,
+                        help='Output JSON file to write.')
     parser.add_argument('--plot',
-            action='store_true',
-            help='If given, plot something for every file processed.')
-    parser.add_argument('--method', 
-            type=str, 
-            default="central_avg_envelope",
-            help="Specifies the method to uses")
+                        action='store_true',
+                        help='If given, plot something for every file processed.')
+    parser.add_argument('--method',
+                        type=str,
+                        default="central_avg_envelope",
+                        help="Specifies the method to uses")
     parser.add_argument('--avg_window_size',
-            type=int,
-            default=50,
-            help="Relevant only for method='central_avg_envelope', size of sliding window")
+                        type=int,
+                        default=50,
+                        help="Relevant only for method='central_avg_envelope', size of sliding window")
     parser.add_argument('--gauss_smooth',
-            type=bool,
-            action='store_true',
-            help="Relevant only for method='central_avg_envelope', if given, apply not simple avg, but weighted")
+                        action='store_true',
+                        help="Relevant only for method='central_avg_envelope', if given, apply not simple avg, "
+                             "but weighted")
+    parser.add_argument('--p_norm',
+                        type=int,
+                        default=2,
+                        help="Relevant only for method='spectral_diff', L_p norm is applied for difference")
+    parser.add_argument('--positive_only',
+                        action='store_true',
+                        help="Relevant only for method='spectral_diff', if given, only enlarging difference is taken "
+                             "into account")
     parser.add_argument('--sliding_max_window_size',
-            type=int,
-            default=150,
-            help="Used for selecting picks of onset detection function as onsets")
+                        type=int,
+                        default=150,
+                        help="Used for selecting odf peaks")
+    parser.add_argument('--min_rel_jump',
+                        type=float,
+                        default=0.25,
+                        help="Used for selecting odf peaks, local max is a peak only if local max / local min > 1 + min_rel_jump")
     return parser
 
 
@@ -77,34 +91,34 @@ def detect_everything(filename, options):
     fps = 70
     hop_length = sample_rate // fps
     spect = librosa.stft(
-            signal, n_fft=2048, hop_length=hop_length, window='hann')
+        signal, n_fft=2048, hop_length=hop_length, window='hann')
 
     # only keep the magnitude
     magspect = np.abs(spect)
 
     # compute a mel spectrogram
     melspect = librosa.feature.melspectrogram(
-            S=magspect, sr=sample_rate, n_mels=80, fmin=27.5, fmax=8000)
+        S=magspect, sr=sample_rate, n_mels=80, fmin=27.5, fmax=8000)
 
     # compress magnitudes logarithmically
-    melspect = np.log1p(100 * melspect) 
+    melspect = np.log1p(100 * melspect)
 
     # compute onset detection function
     odf, odf_rate = onset_detection_function(
-            sample_rate, signal, fps, spect, magspect, melspect, options)
+        sample_rate, signal, fps, spect, magspect, melspect, options)
 
     # detect onsets from the onset detection function
     onsets = detect_onsets(odf_rate, odf, options)
 
     # detect tempo from everything we have
     tempo = detect_tempo(
-            sample_rate, signal, fps, spect, magspect, melspect,
-            odf_rate, odf, onsets, options)
+        sample_rate, signal, fps, spect, magspect, melspect,
+        odf_rate, odf, onsets, options)
 
     # detect beats from everything we have (including the tempo)
     beats = detect_beats(
-            sample_rate, signal, fps, spect, magspect, melspect,
-            odf_rate, odf, onsets, tempo, options)
+        sample_rate, signal, fps, spect, magspect, melspect,
+        odf_rate, odf, onsets, tempo, options)
 
     # plot some things for easier debugging, if asked for it
     if options.plot:
@@ -130,7 +144,6 @@ def detect_everything(filename, options):
             'tempo': list(np.round(tempo, 2))}
 
 
-
 def onset_detection_function(sample_rate, signal, fps, spect, magspect,
                              melspect, options):
     """
@@ -138,17 +151,26 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     where the onsets are. Returns the function values and its sample/frame
     rate in values per second as a tuple: (values, values_per_second)
     """
+    subsampling_factor = 1
     if options.method == "central_avg_envelope":
+        subsampling_factor = options.avg_window_size
         values = moving_central_average(np.abs(signal),
-                                        options.avg_window_size, 
-                                        gaussian_smoothing=options.gauss_smooth)[::options.avg_window_size]
-    """
-    plt.plot(np.abs(signal), label="original magnitude")
-    plt.plot(np.arange(0,len(signal),options.avg_window_size), values, label="moving average")
-    plt.legend()
-    plt.show()
-    """
-    values_per_second = sample_rate / options.avg_window_size
+                                        options.avg_window_size,
+                                        gaussian_smoothing=options.gauss_smooth)[::subsampling_factor]
+        """
+        plt.plot(np.abs(signal), label="original magnitude")
+        plt.plot(np.arange(0,len(signal),options.avg_window_size), values, label="moving average")
+        plt.legend()
+        plt.show()
+        """
+    elif options.method == "spectral_diff":
+        subsampling_factor = sample_rate // fps 
+        values = spectral_diff(spect, options.p_norm, options.positive_only)
+        """plt.plot(values, label="values")
+        plt.legend()
+        plt.show()"""
+
+    values_per_second = sample_rate / subsampling_factor
     return values, values_per_second
 
 
@@ -157,14 +179,21 @@ def detect_onsets(odf_rate, odf, options):
     Detect onsets in the onset detection function.
     Returns the positions in seconds.
     """
-    local_maximas = np.where(sliding_max(odf, options.sliding_max_window_size) == odf)[0]
+    spikes = relative_spikes(odf, options.sliding_max_window_size, options.min_rel_jump)
+
+    """
+    plt.plot(sliding_max(odf, options.sliding_max_window_size), label="sliding max")
+    plt.plot(sliding_min(odf, options.sliding_max_window_size), label="sliding min")
     
-    """plt.plot(sliding_max(odf, 5_000), label="sliding max")
     plt.plot(odf, label="onset detection function")
+    plt.plot(spikes, odf[spikes], 'o', label="onset detection function")
+    all_local_maximas = relative_spikes(odf, options.sliding_max_window_size, 0.0)
+    plt.plot(all_local_maximas, odf[all_local_maximas], 'x', label="local_maximas")
     plt.legend()
-    plt.show()"""
-    
-    return local_maximas / odf_rate
+    plt.show()
+    """
+
+    return spikes / odf_rate
 
 
 def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
@@ -172,14 +201,22 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
     """
     Detect tempo using any of the input representations.
     Returns one tempo or two tempo estimations.
-    """    
+    """
     # tempo = 60 / (onsets[1] - onsets[0]) # old dummy placeholder
     # plt.hist(np.diff(onsets))
     # plt.show()
-    
+
     differences = np.diff(onsets)
-    tempo = 60 / differences[(0.25 <= differences) & (differences<=0.5)].mean()
-    
+    diffs_in_range = differences[(0.25 <= differences) & (differences <= 0.5)]
+    if len(diffs_in_range) > 0:
+        mean_diff_in_range = diffs_in_range.mean()
+    else:
+        """plt.hist(differences)
+        plt.show()"""
+        mean_diff_in_range = differences.mean()
+        
+    tempo = 60 / mean_diff_in_range
+
     return [tempo / 2, tempo]
 
 
@@ -219,4 +256,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
