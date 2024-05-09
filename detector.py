@@ -172,7 +172,10 @@ def detect_onsets(odf_rate, odf, options):
     Detect onsets in the onset detection function.
     Returns the positions in seconds.
     """
-    spikes = relative_spikes(odf, options.sliding_max_window_size, options.min_rel_jump)
+
+    spikes = relative_spikes(odf, 
+                             options.sliding_max_window_size, 
+                             options.min_rel_jump, options.plot_lvl > 2)
 
     if options.plot_lvl > 1:
         plt.plot(sliding_max(odf, options.sliding_max_window_size), label="sliding max")
@@ -195,16 +198,27 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
     Returns one tempo or two tempo estimations.
     """
     differences = np.diff(onsets)
-    diffs_in_range = differences[(0.25 <= differences) & (differences <= 0.5)]
-    if len(diffs_in_range) > 0:
-        mean_diff_in_range = diffs_in_range.mean()
-    else:
-        if options.plot_lvl > 1:
+
+    if options.plot_lvl > 2:
             plt.hist(differences)
             plt.show()
-        mean_diff_in_range = differences.mean()
-        
-    tempo = 60 / mean_diff_in_range
+    estimates = []
+    for p in range(-3, 3):
+        for base in [2,3,5,7]:
+            range_min = base**p
+            if range_min > 4:
+                continue
+            diffs_in_range = differences[(range_min <= differences) & (differences <= range_min * base)]
+            if len(diffs_in_range) > len(differences)/10:
+                est = np.median(diffs_in_range)
+                while est > 0.75:
+                    est /= 2
+                while est < 0.25:
+                    est *= 2
+                estimates.append(est)
+    
+    tempo = 60 / np.median(estimates)
+
 
     return [tempo / 2, tempo]
 
