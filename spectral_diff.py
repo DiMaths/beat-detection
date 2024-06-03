@@ -1,10 +1,10 @@
 import numpy as np
 
 
-def spectral_diff(X: np.ndarray, p_norm: int = 2, positive_only: bool = False) -> np.ndarray:
+def spectral_diff(X: np.ndarray, p_norm: int = 2, positive_only: bool = False, melscaled: bool = False) -> np.ndarray:
     """
     Computes spectral difference
-    @param X: np.ndarray - original STFT
+    @param X: np.ndarray - original STFT or melspect
     @param p_norm: int - L_p norm is used
     @param positive_only: bool 
         - if True, cares only about positive components of the difference,
@@ -12,8 +12,10 @@ def spectral_diff(X: np.ndarray, p_norm: int = 2, positive_only: bool = False) -
 
     @returns diff: np.ndarray - norm(X[t] - X[t-1])
     """
-
-    X_log = np.log10(1 + 10 * np.abs(X))
+    if melscaled:
+        X_log = X.copy()
+    else:
+        X_log = np.log10(1 + 10 * np.abs(X))
     X_delayed = np.zeros_like(X_log)
     X_delayed[:, 1:] = X_log[:, :-1].copy()
     diff = X_log - X_delayed

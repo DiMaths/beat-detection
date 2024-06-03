@@ -25,6 +25,7 @@ from central_avg_envlope import moving_central_average
 from spectral_diff import spectral_diff
 from util import sliding_max, sliding_min, relative_spikes
 
+from evaluate import read_data
 
 def opts_parser():
     usage = \
@@ -42,6 +43,9 @@ Detects onsets, beats and tempo in WAV files.
                         type=int,
                         default=0,
                         help='Debugging plots during the run, higher lvl -> more extra plots')
+    parser.add_argument('--training',
+                        action='store_true',
+                        help="If plot lvl > 0, shows ground truth beats, onsets and tempo on the plots")
     parser.add_argument('--method',
                         type=str,
                         default="central_avg_envelope",
@@ -123,21 +127,32 @@ def detect_everything(filename, options):
 
     # plot some things for easier debugging, if asked for it
     if options.plot_lvl > 0:
-        fig, axes = plt.subplots(3, sharex=True)
+        fig, axes = plt.subplots(3, sharex=True, figsize=(12,7))
         plt.subplots_adjust(hspace=0.3)
         plt.suptitle(filename)
         axes[0].set_title('melspect')
         axes[0].imshow(melspect, origin='lower', aspect='auto',
                        extent=(0, melspect.shape[1] / fps,
                                -0.5, melspect.shape[0] - 0.5))
+        
         axes[1].set_title('onsets')
         axes[1].plot(np.arange(len(odf)) / odf_rate, odf)
+    
         for position in onsets:
-            axes[1].axvline(position, color='tab:orange')
-        axes[2].set_title('beats (tempo: %r)' % list(np.round(tempo, 2)))
+            axes[1].axvline(position, color='tab:red')
+        if options.training:
+            for position in GT[filename.stem]['onsets']:
+                axes[1].axvline(position, color='tab:green', linestyle='--')
+        title = 'beats (tempo: %r)' % list(np.round(tempo, 2))
+        if options.training:
+            title += ' (ground truth tempo: %r)'  % list(np.round(GT[filename.stem]['tempo'], 2))
+        axes[2].set_title(title)
         axes[2].plot(np.arange(len(odf)) / odf_rate, odf)
         for position in beats:
             axes[2].axvline(position, color='tab:red')
+        if options.training:
+            for position in GT[filename.stem]['beats']:
+                axes[2].axvline(position, color='tab:green', linestyle='--')
         plt.show()
 
     return {'onsets': list(np.round(onsets, 3)),
@@ -162,7 +177,9 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     elif options.method == "spectral_diff":
         subsampling_factor = sample_rate // fps 
         values = spectral_diff(spect, options.p_norm, options.positive_only)
-
+    elif options.method == "melspect_diff":
+        subsampling_factor = sample_rate // fps
+        values = spectral_diff(melspect, options.p_norm, options.positive_only, melscaled=True)
     values_per_second = sample_rate / subsampling_factor
     return values, values_per_second
 
@@ -175,7 +192,8 @@ def detect_onsets(odf_rate, odf, options):
 
     spikes = relative_spikes(odf, 
                              options.sliding_max_window_size, 
-                             options.min_rel_jump, options.plot_lvl > 2)
+                             options.min_rel_jump, options.plot_lvl > 9)
+
 
     if options.plot_lvl > 1:
         plt.plot(sliding_max(odf, options.sliding_max_window_size), label="sliding max")
@@ -206,7 +224,7 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
     for p in range(-3, 3):
         for base in [2,3,5,7]:
             range_min = base**p
-            if range_min > 4:
+            if range_min > 4 or range_min < 0.03:
                 continue
             diffs_in_range = differences[(range_min <= differences) & (differences <= range_min * base)]
             if len(diffs_in_range) > len(differences)/10:
@@ -229,7 +247,6 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     Detect beats using any of the input representations.
     Returns the positions of all beats in seconds.
     """
-
     beats = onsets
     return beats
 
@@ -241,6 +258,9 @@ def main():
 
     # iterate over input directory
     indir = Path(options.indir)
+    global GT 
+    if options.training:
+        GT = read_data(indir)
     infiles = list(indir.glob('*.wav'))
     if tqdm is not None:
         infiles = tqdm.tqdm(infiles, desc='File')

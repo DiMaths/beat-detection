@@ -80,4 +80,6 @@ def relative_spikes(x: np.ndarray, w: int, min_rel_jump: float, debug_plot: bool
     local_maximas = np.where(slide_max == x)[0]
     possible_jumps = np.where(relative_jumps > min_rel_jump)[0]
     spikes = np.intersect1d(local_maximas, possible_jumps)
+    if spikes[0] == 0:
+        spikes = spikes[1:]
     return spikes
