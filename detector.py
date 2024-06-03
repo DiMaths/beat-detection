@@ -194,6 +194,7 @@ def detect_onsets(odf_rate, odf, options):
                              options.sliding_max_window_size, 
                              options.min_rel_jump, options.plot_lvl > 9)
 
+
     if options.plot_lvl > 1:
         plt.plot(sliding_max(odf, options.sliding_max_window_size), label="sliding max")
         plt.plot(sliding_min(odf, options.sliding_max_window_size), label="sliding min")
