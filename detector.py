@@ -7,6 +7,7 @@ Detects onsets, beats and tempo in WAV files.
 For usage information, call with --help.
 
 Author of the skeleton: Jan Schlüter
+Authors: Dmytro Borysenkov
 """
 
 import sys
@@ -48,7 +49,7 @@ Detects onsets, beats and tempo in WAV files.
                         help="If plot lvl > 0, shows ground truth beats, onsets and tempo on the plots")
     parser.add_argument('--method',
                         type=str,
-                        default="central_avg_envelope",
+                        default="spectral_diff",
                         help="Specifies the method to uses")
     parser.add_argument('--avg_window_size',
                         type=int,
@@ -60,7 +61,7 @@ Detects onsets, beats and tempo in WAV files.
                              "but weighted")
     parser.add_argument('--p_norm',
                         type=int,
-                        default=2,
+                        default=1,
                         help="Relevant only for method='spectral_diff', L_p norm is applied for difference")
     parser.add_argument('--positive_only',
                         action='store_true',
@@ -68,11 +69,11 @@ Detects onsets, beats and tempo in WAV files.
                              "into account")
     parser.add_argument('--sliding_max_window_size',
                         type=int,
-                        default=150,
+                        default=12,
                         help="Used for selecting odf peaks")
     parser.add_argument('--min_rel_jump',
                         type=float,
-                        default=0.25,
+                        default=0.0,
                         help="Used for selecting odf peaks, local max is a peak only if local max / local min > 1 + min_rel_jump")
     return parser
 
