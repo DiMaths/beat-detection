@@ -37,7 +37,7 @@ def opts_parser():
     parser.add_argument('--extended',
             action='store_true',
             default=False,
-            help="Enables detailed prints of evaluation")
+            help="Enables detailed plots of evaluation")
     return parser
 
 
@@ -253,7 +253,7 @@ def main():
     if options.extended:
         global bad_samples
         bad_samples = dict()
-        
+
     # evaluate
     try:
         print(f"Onsets F-score: {eval_onsets(truth, preds, options): .4f}")
