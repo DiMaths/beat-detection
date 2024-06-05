@@ -112,8 +112,7 @@ def eval_onsets(truth, preds, options):
         fig.tight_layout()
         plt.show()
 
-        print(f"Poorly-guessed onsets of: {[k for k in bad_estimates]}")
-        print()
+        bad_samples['onsets'] = [k for k in bad_estimates]
 
     return sum(f_scores) / len(truth)
 
@@ -187,10 +186,9 @@ def eval_tempo(truth, preds, options):
         fig.tight_layout()
         plt.show()
 
-        print(f"Half-guessed: {[k for k in bad_estimates]}")
-        print()
-        print(f"Misspredicted completely: {[k for k in worst_estimates]}")
-        print()
+        bad_samples['tempo'] = dict()
+        bad_samples['tempo']['half_guessed'] = [k for k in bad_estimates]
+        bad_samples['tempo']['completely_misspredicted'] = [k for k in worst_estimates]
 
     return sum(p_scores) / len(truth)
 
@@ -199,10 +197,47 @@ def eval_beats(truth, preds, options):
     """
     Computes the average beat detection F-score.
     """
-    return sum(mir_eval.beat.f_measure(np.asarray(truth[k]['beats']),
-                                       np.asarray(preds[k]['beats']),
-                                       0.07)
-               for k in truth if k in preds) / len(truth)
+    beat_evals = dict()
+
+    for k in truth:
+        if k in preds:
+            beat_evals[k] = mir_eval.beat.f_measure(
+                                np.asarray(truth[k]['beats']),       
+                                np.asarray(preds[k]['beats']),
+                                0.07)
+    f_scores = [beat_evals[k] for k in beat_evals]
+
+    if options.extended:
+        bad_estimates = dict()
+        f_score_avg = np.mean(f_scores)
+        f_score_variance = np.var(f_scores) 
+        for k in beat_evals:
+            if beat_evals[k] < f_score_avg - f_score_variance:
+                bad_estimates[k] = beat_evals[k]
+
+        bad_f_scores = [beat_evals[k] for k in bad_estimates]
+
+        bad_estimates_labels = [k if len(k)< 25 else f"{k[:10]}...{k[-10:]}" for k in list(bad_estimates.keys())]
+        
+        fig, ax = plt.subplots(1, 1, figsize=(12, 7), sharex=True, sharey=True)
+        ax.bar(bad_estimates_labels, bad_f_scores, color="orange", label='F-score')
+        ax.set_ylabel("f_score")
+        
+        ax.axhline(f_score_avg, -1, len(bad_estimates_labels) + 2, color='red', linestyle='-', label="Average over all samples")
+
+        ax.set_xlim(-1, len(bad_estimates) + 1)
+        ax.set_ylim(0, 1.15)
+        ax.axhline(1, -1, len(bad_estimates_labels) + 2, color='black', linestyle='--')
+        ax.set_xticks(range(len(bad_estimates_labels)))
+        ax.set_xticklabels(bad_estimates_labels, rotation=90, ha='center')
+        plt.legend(loc='upper center', ncol=2, prop={'size': 14})
+        fig.suptitle(f"Beats Estimation Extended Evaluation Plot of the worst (lowest f-score) beats samples (total: {len(bad_estimates)})")
+        fig.tight_layout()
+        plt.show()
+
+        bad_samples['beats'] = [k for k in bad_estimates]
+
+    return sum(f_scores) / len(truth)
 
 
 def main():
@@ -215,7 +250,10 @@ def main():
 
     # read predictions
     preds = read_data(options.predictions, extension='.pr')
-
+    if options.extended:
+        global bad_samples
+        bad_samples = dict()
+        
     # evaluate
     try:
         print(f"Onsets F-score: {eval_onsets(truth, preds, options): .4f}")
@@ -233,6 +271,18 @@ def main():
     except KeyError:
         print("Beats seemingly not included.")
 
+    if options.extended:
+        bad_tempo_samples = set.union(
+            set(bad_samples['tempo']['half_guessed']),
+            set(bad_samples['tempo']['completely_misspredicted']))
+        intersection = set.intersection(
+            set(bad_samples['beats']), 
+            set(bad_samples['onsets']), 
+            bad_tempo_samples) 
+        print(f"Samples on which all 3 estimations were poor (total: {len(intersection)}):")
+        for k in intersection:
+            print(k)
+        print('-'*20)
 
 if __name__ == "__main__":
     main()

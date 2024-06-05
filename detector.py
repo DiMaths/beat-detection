@@ -220,6 +220,7 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
 
     if options.plot_lvl > 2:
             plt.hist(differences)
+            plt.suptitle("Onset differences distribution")
             plt.show()
     estimates = []
     for p in range(-3, 3):
@@ -228,17 +229,26 @@ def detect_tempo(sample_rate, signal, fps, spect, magspect, melspect,
             if range_min > 4 or range_min < 0.03:
                 continue
             diffs_in_range = differences[(range_min <= differences) & (differences <= range_min * base)]
-            if len(diffs_in_range) > len(differences)/10:
+            if len(diffs_in_range) > len(differences)/20:
                 est = np.median(diffs_in_range)
-                while est > 0.75:
+                while est > 0.75: # until tempo estimate is < 80 (tempo/2 < 40)
                     est /= 2
-                while est < 0.25:
+                while est < 0.25: # until tempo estimate is > 240 (tempo/2 > 120)
                     est *= 2
                 estimates.append(est)
     
-    tempo = 60 / np.median(estimates)
-
-
+    if len(estimates) > 0:
+        tempo = 60 / np.median(estimates)
+    else:
+        if options.plot_lvl > 0:
+            plt.hist(differences)
+            plt.title("Not enough onsets detected to estimate the tempo, tempo =  [60, 120] returned as default")
+            plt.suptitle("Onset differences distribution")
+            plt.show()
+        else:
+            print("Not enough onsets detected to estimate the tempo, tempo =  [60, 120] returned as default")
+            
+        return [60., 120.]    
     return [tempo / 2, tempo]
 
 
