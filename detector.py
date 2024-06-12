@@ -94,7 +94,7 @@ def detect_everything(filename, options):
         signal = signal.mean(axis=-1)
 
     # compute spectrogram with given number of frames per second
-    fps = 70
+    fps = 100  # should be 70, I just temporaly replace it to be 100
     hop_length = sample_rate // fps
     spect = librosa.stft(
         signal, n_fft=2048, hop_length=hop_length, window='hann')
@@ -114,7 +114,12 @@ def detect_everything(filename, options):
         sample_rate, signal, fps, spect, magspect, melspect, options)
 
     # detect onsets from the onset detection function
-    onsets = detect_onsets(odf_rate, odf, options)
+
+    # Dmytro, could you please set that this code will work if it asked so in parser, cause
+    # I never worked with it
+    #onsets_CHH = detect_onsets_with_CNN()
+
+    # onsets = detect_onsets(odf_rate, odf, options)
 
     # detect tempo from everything we have
     tempo = detect_tempo(
@@ -262,6 +267,199 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
+def detect_onsets_with_CNN():
+    pass
+
+
+import torch
+from torch.utils.data import DataLoader
+import os
+import torch.nn.functional as F
+from tqdm import tqdm
+import sklearn
+import torch.nn as nn
+from sklearn.metrics import accuracy_score
+from model_CNN import CNN_Model
+from sklearn.model_selection import train_test_split
+
+class CNN_dataset(torch.utils.data.Dataset):
+
+    def __init__(self,infiles):
+
+        data_df = [np.zeros((3,80,7),dtype=float)] # padding of 7
+        labels_df = []
+        count  = 0
+        for filename in infiles:
+            data, label = self.get_np_data(filename)
+            data_df.append(data)
+            labels_df.append(label)
+            count = count + 1
+
+        data_df.append(np.zeros((3,80,7),dtype=float)) # padding of 7
+
+        self.data_df = np.concatenate(data_df,axis=2)
+        self.labels_df = np.concatenate(labels_df,axis=0).reshape(-1,1)
+        print(self.labels_df.shape)
+
+
+    def __len__(self):
+        return self.labels_df.shape[0]
+
+    def __getitem__(self, idx: int):
+        label = torch.Tensor(self.labels_df[idx])
+        item = torch.Tensor(self.data_df[:,:,idx:idx+15])
+        return item, label
+    
+    def get_np_data(self,filename):
+        sample_rate, signal = wavfile.read(filename)
+
+        # convert from integer to float
+        if signal.dtype.kind == 'i':
+            signal = signal / np.iinfo(signal.dtype).max
+
+        # convert from stereo to mono (just in case)
+        if signal.ndim == 2:
+            signal = signal.mean(axis=-1)
+
+        fps_ = 100
+        hop_length_ = sample_rate // fps_
+
+        base_name_with_extension = os.path.basename(filename)
+        base_name = os.path.splitext(base_name_with_extension)[0]
+
+        melspects_3 = []
+        
+        n_ffts = [1024,2048,4096]
+        for n_fft in n_ffts:
+
+            spect_ = librosa.stft(signal, n_fft=n_fft, hop_length=hop_length_, window='hann')
+
+            # Only keep the magnitude
+            magspect_ = np.abs(spect_)
+
+            # compute a mel spectrogram
+            melspect_ = librosa.feature.melspectrogram(S=magspect_, sr=sample_rate, n_mels=80, fmin=27.5, fmax=16000)
+            
+            # compress magnitudes logarithmically
+            melspect_ = np.log1p(100 * melspect_)
+            melspects_3.append(melspect_)
+
+
+        melspects_3 = np.array(melspects_3)
+
+            
+        # ground truth ------------- #  ----------- # ------------ #
+        onsets_ground_t = np.around((np.array(GT[base_name]["onsets"])*100)).astype(int)
+
+        onsets_ground_t_3 = []
+        for i in onsets_ground_t:
+            onsets_ground_t_3.append(i-1)
+            onsets_ground_t_3.append(i)
+            onsets_ground_t_3.append(i+1)
+
+        # basic deletion of 1st and last element
+        if onsets_ground_t_3[0] < 1:
+            onsets_ground_t_3 = onsets_ground_t_3[1:]
+        if onsets_ground_t_3[-1] > melspects_3.shape[2]-1:
+            onsets_ground_t_3 = onsets_ground_t_3[:-1]
+
+        ground_truth_onsets = np.zeros(melspects_3.shape[2])
+        ground_truth_onsets[onsets_ground_t_3] = 1
+        # ground truth ------------- #  ----------- # ------------ #
+
+        # plt.imshow(melspects_3[0], aspect='auto', cmap='viridis')
+        # plt.show()
+
+        return melspects_3, ground_truth_onsets
+
+
+
+
+def training_step(network, optimizer, data, targets, loss_fn):
+    optimizer.zero_grad()
+    output = network(data,istraining=True)
+    labels_processed = targets.flatten().float().reshape(-1,1)
+    # print(labels_processed.shape,output.shape)
+    loss = loss_fn(output, labels_processed)
+    loss.backward()
+    optimizer.step()
+    return loss.item()
+
+    
+def get_metric(network, test_dataloader,loss_fn,treshold = 0.65):
+    network.eval().to('cuda')
+    running_loss = 0.
+    accuracy = 0.
+    counter = 0
+    f1_scores = 0.
+    for i, data in tqdm(enumerate(test_dataloader)):
+        input, true_labels = data
+        input = input.to('cuda')
+        true_labels = true_labels.to('cuda')
+        output = network(input,istraining=False)
+        labels_processed = true_labels.flatten().float().reshape(-1,1)
+        loss = loss_fn(output, labels_processed)
+        running_loss += loss.item()
+
+        # for now I will impement it without hamming window as I am supposed
+        # but only with treshold
+        output = output.detach().cpu().numpy()
+        output = (output>treshold).astype(int)
+ 
+        labels_processed = labels_processed.detach().cpu().numpy()
+        acc = accuracy_score(labels_processed, output)
+        f1 = sklearn.metrics.f1_score(labels_processed, output,average="weighted")
+        f1_scores += f1
+        accuracy += acc
+        counter += 1
+    print('Loss =', running_loss / counter)
+    print('Accuracy = ', 100 * (accuracy / counter))
+    print('F1_score = ', 100 * (f1_scores / counter))
+
+
+def training_loop(
+        network: torch.nn.Module,
+        train_dataloader: torch.utils.data.dataloader.DataLoader,
+        test_dataloader: torch.utils.data.dataloader.DataLoader,
+        num_epochs: int,
+        show_progress: bool = True) -> tuple[list, list]:
+    
+    loss_fn = nn.MSELoss()
+    device = "cuda"
+    device = torch.device(device)
+    print(torch.__version__)
+    print(torch.cuda.get_device_name(0))
+
+    if not torch.cuda.is_available():
+        print("CUDA IS NOT AVAILABLE")
+        device = torch.device("cpu")
+    losses = []
+
+    optimizer = torch.optim.AdamW(network.parameters(), lr=0.0002)
+
+    for epoch in tqdm(range(num_epochs), desc="Epoch", position=0, disable= (not show_progress)):
+
+        network.train().to('cuda')
+        running_loss = 0.
+        last_loss = 0.
+        for i, data in tqdm(enumerate(train_dataloader), desc="Minibatch", position=1, leave=False, disable= (not show_progress)):
+            inputs, targets = data
+            inputs = inputs.to(device=device)
+            targets = targets.to(device=device)
+            loss = training_step(network, optimizer, inputs, targets,loss_fn)
+            running_loss += loss
+            if i % 1000 == 999:
+                last_loss = running_loss / 999 # loss per batch
+                print('  batch {} loss: {}'.format(i + 1, last_loss))
+                running_loss = 0.
+
+        losses.append(last_loss)
+        print('\n')
+        get_metric(network, test_dataloader,loss_fn)
+        print('\n\n\n')
+            
+    return network, losses
+
 def main():
     # parse command line
     parser = opts_parser()
@@ -273,6 +471,41 @@ def main():
     if options.training:
         GT = read_data(indir)
     infiles = list(indir.glob('*.wav'))
+
+    # Train_ data -------------- # -------------- # -------------- # - # - # - # - # - #
+    
+
+    indir_train_c = Path("train_extra/")
+    infiles_train_c = list(indir_train_c.glob('*.wav'))
+    print(len(GT.keys()),"GT_befor")
+    if options.training:
+        dict_extra = read_data(indir_train_c)
+        GT.update(dict_extra)
+    print(len(GT.keys()),"GT")
+    print(len(infiles_train_c),"indir_train_c")
+    # CNN -------------- # -------------- # -------------- # - # - # - # - # - #
+
+    print("Training CNN")
+    train, test = train_test_split(infiles_train_c, test_size=0.1)
+    # python detector.py train/ output.json --plot_lvl 0 --training
+    dataset_train = CNN_dataset(train)
+    print("Train data is ready")
+    dataset_val = CNN_dataset(test)
+    print("Val data is ready")
+
+    print("LEN of data:", len(dataset_train))
+    print("LEN of data:", len(dataset_val))
+    print("FISRT ELEMENT", dataset_train[0][0].shape)
+
+    model = CNN_Model()
+
+    train_dataloader = DataLoader(dataset_train, batch_size=64, shuffle=True)
+    test_dataloader = DataLoader(dataset_val, batch_size=64, shuffle=False)
+    
+    model,_ = training_loop(model,train_dataloader,test_dataloader,4,True) # network
+
+    # CNN -------------- # -------------- # -------------- # - # - # - # - # - #
+
     if tqdm is not None:
         infiles = tqdm.tqdm(infiles, desc='File')
     results = {}
