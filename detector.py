@@ -7,10 +7,9 @@ Detects onsets, beats and tempo in WAV files.
 For usage information, call with --help.
 
 Author of the skeleton: Jan Schlüter
-Authors: Dmytro Borysenkov
+Authors: Dmytro Borysenkov, Roman Chervinskyy
 """
 
-import sys
 from pathlib import Path
 from argparse import ArgumentParser
 import json
@@ -18,14 +17,17 @@ import json
 import numpy as np
 from scipy.io import wavfile
 import librosa
-import tqdm
 
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
+from torch.utils.data import DataLoader
+from sklearn.model_selection import train_test_split
+
+from melspect_CNN import CNN_Model, CNN_dataset, train_model
 from central_avg_envlope import moving_central_average
 from spectral_diff import spectral_diff
 from util import sliding_max, sliding_min, relative_spikes
-
 from evaluate import read_data
 
 def opts_parser():
@@ -50,7 +52,7 @@ Detects onsets, beats and tempo in WAV files.
     parser.add_argument('--method',
                         type=str,
                         default="spectral_diff",
-                        help="Specifies the method to uses")
+                        help="Specifies the method to uses: available 'spectral_diff', 'melspect_diff', 'central_avg_envelope' and 'melsepect_cnn'.")
     parser.add_argument('--avg_window_size',
                         type=int,
                         default=50,
@@ -71,6 +73,10 @@ Detects onsets, beats and tempo in WAV files.
                         type=int,
                         default=12,
                         help="Used for selecting odf peaks")
+    parser.add_argument('--spectrogram_fps',
+                        type=int,
+                        default=70,
+                        help="Number of spectral frames per second")
     parser.add_argument('--min_rel_jump',
                         type=float,
                         default=0.0,
@@ -94,7 +100,7 @@ def detect_everything(filename, options):
         signal = signal.mean(axis=-1)
 
     # compute spectrogram with given number of frames per second
-    fps = 70
+    fps = options.spectrogram_fps 
     hop_length = sample_rate // fps
     spect = librosa.stft(
         signal, n_fft=2048, hop_length=hop_length, window='hann')
@@ -110,8 +116,16 @@ def detect_everything(filename, options):
     melspect = np.log1p(100 * melspect)
 
     # compute onset detection function
-    odf, odf_rate = onset_detection_function(
-        sample_rate, signal, fps, spect, magspect, melspect, options)
+    if options.method == 'melspect_cnn':
+        odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate)
+    else:
+        odf, odf_rate = onset_detection_function(sample_rate, 
+                                                 signal, 
+                                                 fps, 
+                                                 spect, 
+                                                 magspect, 
+                                                 melspect, 
+                                                 options)
 
     # detect onsets from the onset detection function
     onsets = detect_onsets(odf_rate, odf, options)
@@ -271,6 +285,22 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
+def get_odf_with_CNN(test, model_CNN, fps, sample_rate):
+    dataset_test = CNN_dataset([test],GT,test_tr = 1)
+    train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
+    odf = []
+    for input in train_dataloader:
+        input = input.to('cuda')
+        output = model_CNN(input,istraining=False)
+        output = output.detach().cpu().numpy()
+        odf.append(output)
+
+    odf = np.concatenate(odf,axis=0).reshape(-1)
+    odf_rate = sample_rate / (sample_rate // fps)
+
+    return odf, odf_rate
+
+
 def main():
     # parse command line
     parser = opts_parser()
@@ -282,8 +312,38 @@ def main():
     if options.training:
         GT = read_data(indir)
     infiles = list(indir.glob('*.wav'))
+
+    if options.method == 'melspect_cnn':
+        train_extra_dir = Path("train_extra/")
+        files_extra_train = list(train_extra_dir.glob('*.wav'))
+
+        train_dir = Path("train/")
+        files_train = list(train_dir.glob('*.wav'))
+
+        files_for_training = files_train + files_extra_train
+
+
+        dict_extra = read_data(train_extra_dir)
+        dict_train = read_data(train_dir)
+        GT.update(dict_extra)
+        GT.update(dict_train)
+
+        train, test = train_test_split(files_for_training, test_size=0.02)
+        dataset_train = CNN_dataset(train, GT, options)
+        dataset_val = CNN_dataset(test, GT, options)
+
+        options.model = CNN_Model()
+
+        train_dataloader = DataLoader(dataset_train, batch_size=128, shuffle=True)
+        test_dataloader = DataLoader(dataset_val, batch_size=128, shuffle=False)
+
+        options.model = train_model(options.model, 
+                                    train_dataloader, 
+                                    test_dataloader, 5, True)
+
+
     if tqdm is not None:
-        infiles = tqdm.tqdm(infiles, desc='File')
+        infiles = tqdm(infiles, desc='File')
     results = {}
     for filename in infiles:
         results[filename.stem] = detect_everything(filename, options)
