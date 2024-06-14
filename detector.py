@@ -7,7 +7,7 @@ Detects onsets, beats and tempo in WAV files.
 For usage information, call with --help.
 
 Author of the skeleton: Jan Schlüter
-Authors: Dmytro Borysenkov
+Authors: Dmytro Borysenkov, Roman Chervinskyy
 """
 
 import sys
@@ -19,12 +19,18 @@ import numpy as np
 from scipy.io import wavfile
 import librosa
 import tqdm
+from torch.utils.data import DataLoader
+from melspect_CNN import CNN_Model
+from melspect_CNN import CNN_dataset
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 
 from central_avg_envlope import moving_central_average
 from spectral_diff import spectral_diff
 from util import sliding_max, sliding_min, relative_spikes
+from sklearn.model_selection import train_test_split
+from melspect_CNN import training_loop
 
 from evaluate import read_data
 
@@ -78,7 +84,7 @@ Detects onsets, beats and tempo in WAV files.
     return parser
 
 
-def detect_everything(filename, options,model_CNN):
+def detect_everything(filename, options):
     """
     Computes some shared features and calls the onset, tempo and beat detectors.
     """
@@ -110,22 +116,13 @@ def detect_everything(filename, options,model_CNN):
     melspect = np.log1p(100 * melspect)
 
     # compute onset detection function
-    odf, odf_rate = onset_detection_function(
-        sample_rate, signal, fps, spect, magspect, melspect, options)
+    if options.method == 'melspect_cnn':
+        odf, odf_rate = detect_onsets_with_CNN(filename,options.model,fps,sample_rate)
+    else:
+        odf, odf_rate = onset_detection_function(sample_rate, signal, fps, spect, magspect, melspect, options)
 
-    # detect onsets from the onset detection function
-
-    # Dmytro, could you please set that this code will work if it asked so in parser, cause
-    # I never worked with it
-    onsets = detect_onsets_with_CNN(filename,model_CNN)
-    # print("-------------------------------")
-    # print(onsets)
-    # print("-------------------------------")
-
-    # onsets_2 = detect_onsets(odf_rate, odf, options)
-    # print("-------------------------------")
-    # print(onsets_2)
-    # print("-------------------------------")
+#    detect onsets from the onset detection function
+    onsets = detect_onsets(odf_rate, odf, options)
 
     # detect tempo from everything we have
     tempo = detect_tempo(
@@ -273,230 +270,23 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
-def detect_onsets_with_CNN(test,model_CNN,threshold=0.63):
-    dataset_test = CNN_dataset([test],test_tr = 1)
+def detect_onsets_with_CNN(test,model_CNN,fps,sample_rate):
+    dataset_test = CNN_dataset([test],GT,test_tr = 1)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
-    testing_np = []
+    odf = []
     for input in train_dataloader:
         input = input.to('cuda')
         output = model_CNN(input,istraining=False)
         output = output.detach().cpu().numpy()
-        testing_np.append(output)
+        odf.append(output)
 
-    testing_np = np.concatenate(testing_np,axis=0)
-    testing_np = testing_np.reshape(-1)
-    peaks, _ = find_peaks(testing_np,distance=4)
-    onsets = []
+    odf = np.concatenate(odf,axis=0).reshape(-1)
+    odf_rate = sample_rate / (sample_rate // fps)
 
-    for peak in peaks:
-        if testing_np[peak] > threshold:
-            onsets.append(peak)
-    
-    onsets = np.array(onsets)/100
-    return onsets
-    
-
-
-import torch
-from torch.utils.data import DataLoader
-import os
-import torch.nn.functional as F
-from tqdm import tqdm
-import sklearn
-import torch.nn as nn
-from sklearn.metrics import accuracy_score
-from model_CNN import CNN_Model
-from sklearn.model_selection import train_test_split
-from scipy.signal import find_peaks
-
-class CNN_dataset(torch.utils.data.Dataset):
-
-    def __init__(self,infiles,test_tr = 0):
-        self.test_train = test_tr
-        data_df = [np.zeros((3,80,7),dtype=float)] # padding of 7
-        if self.test_train == 0:
-            labels_df = []
-
-        for filename in infiles:
-            if self.test_train == 0:
-                data, label = self.get_np_data(filename)
-                labels_df.append(label)
-            else:
-                data = self.get_np_data(filename)
-            data_df.append(data)
-
-        data_df.append(np.zeros((3,80,7),dtype=float)) # padding of 7
-
-        self.data_df = np.concatenate(data_df,axis=2)
-        if self.test_train == 0: 
-            self.labels_df = np.concatenate(labels_df,axis=0).reshape(-1,1)
-            print(self.labels_df.shape)
-
-
-    def __len__(self):
-        return self.data_df.shape[2]-14
-
-    def __getitem__(self, idx: int):
-        if self.test_train == 0:
-            label = torch.Tensor(self.labels_df[idx])
-            item = torch.Tensor(self.data_df[:,:,idx:idx+15])
-            return item, label
-        else:
-            item = torch.Tensor(self.data_df[:,:,idx:idx+15])
-            return item
-    
-    def get_np_data(self,filename):
-        sample_rate, signal = wavfile.read(filename)
-
-        # convert from integer to float
-        if signal.dtype.kind == 'i':
-            signal = signal / np.iinfo(signal.dtype).max
-
-        # convert from stereo to mono (just in case)
-        if signal.ndim == 2:
-            signal = signal.mean(axis=-1)
-
-        fps_ = 100
-        hop_length_ = sample_rate // fps_
-
-        base_name_with_extension = os.path.basename(filename)
-        base_name = os.path.splitext(base_name_with_extension)[0]
-
-        melspects_3 = []
-        
-        n_ffts = [1024,2048,4096]
-        for n_fft in n_ffts:
-
-            spect_ = librosa.stft(signal, n_fft=n_fft, hop_length=hop_length_, window='hann')
-
-            # Only keep the magnitude
-            magspect_ = np.abs(spect_)
-
-            # compute a mel spectrogram
-            melspect_ = librosa.feature.melspectrogram(S=magspect_, sr=sample_rate, n_mels=80, fmin=27.5, fmax=16000)
-            
-            # compress magnitudes logarithmically
-            melspect_ = np.log1p(100 * melspect_)
-            melspects_3.append(melspect_)
-
-
-        melspects_3 = np.array(melspects_3)
-
-        if self.test_train == 0:
-            # ground truth ------------- #  ----------- # ------------ #
-            onsets_ground_t = np.around((np.array(GT[base_name]["onsets"])*100)).astype(int)
-
-            onsets_ground_t_3 = []
-            for i in onsets_ground_t:
-                onsets_ground_t_3.append(i-1)
-                onsets_ground_t_3.append(i)
-                onsets_ground_t_3.append(i+1)
-
-            # basic deletion of 1st and last element
-            if onsets_ground_t_3[0] < 1:
-                onsets_ground_t_3 = onsets_ground_t_3[1:]
-            if onsets_ground_t_3[-1] > melspects_3.shape[2]-1:
-                onsets_ground_t_3 = onsets_ground_t_3[:-1]
-
-            ground_truth_onsets = np.zeros(melspects_3.shape[2])
-            ground_truth_onsets[onsets_ground_t_3] = 1
-            # ground truth ------------- #  ----------- # ------------ #
-
-            # plt.imshow(melspects_3[0], aspect='auto', cmap='viridis')
-            # plt.show()
-
-            return melspects_3, ground_truth_onsets
-        
-        return melspects_3
+    return odf, odf_rate
 
 
 
-def training_step(network, optimizer, data, targets, loss_fn):
-    optimizer.zero_grad()
-    output = network(data,istraining=True)
-    labels_processed = targets.flatten().float().reshape(-1,1)
-    # print(labels_processed.shape,output.shape)
-    loss = loss_fn(output, labels_processed)
-    loss.backward()
-    optimizer.step()
-    return loss.item()
-
-    
-def get_metric(network, test_dataloader,loss_fn,threshold = 0.63):
-    network.eval().to('cuda')
-    running_loss = 0.
-    accuracy = 0.
-    counter = 0
-    f1_scores = 0.
-    for i, data in tqdm(enumerate(test_dataloader)):
-        input, true_labels = data
-        input = input.to('cuda')
-        true_labels = true_labels.to('cuda')
-        output = network(input,istraining=False)
-        labels_processed = true_labels.flatten().float().reshape(-1,1)
-        loss = loss_fn(output, labels_processed)
-        running_loss += loss.item()
-
-        # for now I will impement it without hamming window as I am supposed
-        # but only with threshold
-        output = output.detach().cpu().numpy()
-        output = (output>threshold).astype(int)
-        # output, _ = find_peaks(output,distance=4)
- 
-        labels_processed = labels_processed.detach().cpu().numpy()
-        # labels_processed, _ = find_peaks(labels_processed,distance=4)
-        acc = accuracy_score(labels_processed, output)
-        f1 = sklearn.metrics.f1_score(labels_processed, output,average="weighted")
-        f1_scores += f1
-        accuracy += acc
-        counter += 1
-    print('Loss =', running_loss / counter)
-    print('Accuracy = ', 100 * (accuracy / counter))
-    print('F1_score = ', 100 * (f1_scores / counter))
-
-
-def training_loop(
-        network: torch.nn.Module,
-        train_dataloader: torch.utils.data.dataloader.DataLoader,
-        test_dataloader: torch.utils.data.dataloader.DataLoader,
-        num_epochs: int,
-        show_progress: bool = True) -> tuple[list, list]:
-    
-    loss_fn = nn.MSELoss()
-    device = "cuda"
-    device = torch.device(device)
-    print(torch.__version__)
-    print(torch.cuda.get_device_name(0))
-
-    if not torch.cuda.is_available():
-        print("CUDA IS NOT AVAILABLE")
-        device = torch.device("cpu")
-    losses = []
-
-    optimizer = torch.optim.AdamW(network.parameters(), lr=0.0002)
-
-    for epoch in tqdm(range(num_epochs), desc="Epoch", position=0, disable= (not show_progress)):
-
-        network.train().to('cuda')
-        running_loss = 0.
-        last_loss = 0.
-        for i, data in tqdm(enumerate(train_dataloader), desc="Minibatch", position=1, leave=False, disable= (not show_progress)):
-            inputs, targets = data
-            inputs = inputs.to(device=device)
-            targets = targets.to(device=device)
-            loss = training_step(network, optimizer, inputs, targets,loss_fn)
-            running_loss += loss
-            if i % 1000 == 999:
-                last_loss = running_loss / 999 # loss per batch
-                print('  batch {} loss: {}'.format(i + 1, last_loss))
-                running_loss = 0.
-
-        losses.append(last_loss)
-        print('\n')
-        get_metric(network, test_dataloader,loss_fn)
-        print('\n\n\n')
-            
-    return network, losses
 
 def main():
     # parse command line
@@ -510,46 +300,38 @@ def main():
         GT = read_data(indir)
     infiles = list(indir.glob('*.wav'))
 
-    # Train_ data -------------- # -------------- # -------------- # - # - # - # - # - #
-    
+    if options.method == 'melspect_cnn':
+        train_extra_dir = Path("train_extra/")
+        files_extra_train = list(train_extra_dir.glob('*.wav'))
 
-    indir_train_c = Path("train_extra/")
-    infiles_train_c = list(indir_train_c.glob('*.wav'))
-    print(len(GT.keys()),"GT_befor")
-    if options.training:
-        dict_extra = read_data(indir_train_c)
+        train_dir = Path("train/")
+        files_train = list(train_dir.glob('*.wav'))
+
+        files_for_training = files_train + files_extra_train
+
+
+        dict_extra = read_data(train_extra_dir)
+        dict_train = read_data(train_dir)
         GT.update(dict_extra)
-    print(len(GT.keys()),"GT")
-    print(len(infiles_train_c),"indir_train_c")
-    # CNN -------------- # -------------- # -------------- # - # - # - # - # - #
+        GT.update(dict_train)
 
-    print("Training CNN")
-    # infiles_train_c = infiles_train_c[:30]
-    train, test = train_test_split(infiles_train_c, test_size=0.02)
-    # python detector.py train/ output.json --plot_lvl 0 --training
-    dataset_train = CNN_dataset(train)
-    print("Train data is ready")
-    dataset_val = CNN_dataset(test)
-    print("Val data is ready")
+        train, test = train_test_split(files_for_training, test_size=0.02) # python detector.py train/ output.json --plot_lvl 0 --training
+        dataset_train = CNN_dataset(train,GT)
+        dataset_val = CNN_dataset(test,GT)
 
-    print("LEN of data:", len(dataset_train))
-    print("LEN of data:", len(dataset_val))
-    print("FISRT ELEMENT", dataset_train[0][0].shape)
+        options.model = CNN_Model()
 
-    model = CNN_Model()
+        train_dataloader = DataLoader(dataset_train, batch_size=128, shuffle=True)
+        test_dataloader = DataLoader(dataset_val, batch_size=128, shuffle=False)
 
-    train_dataloader = DataLoader(dataset_train, batch_size=64, shuffle=True)
-    test_dataloader = DataLoader(dataset_val, batch_size=64, shuffle=False)
-    
-    model,_ = training_loop(model,train_dataloader,test_dataloader,5,True) # network
+        options.model,_ = training_loop(options.model,train_dataloader,test_dataloader,5,True) # network
 
-    # CNN -------------- # -------------- # -------------- # - # - # - # - # - #
 
     if tqdm is not None:
         infiles = tqdm(infiles, desc='File')
     results = {}
     for filename in infiles:
-        results[filename.stem] = detect_everything(filename, options,model)
+        results[filename.stem] = detect_everything(filename, options)
 
     # write output file
     with open(options.outfile, 'w') as f:
