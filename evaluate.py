@@ -272,17 +272,20 @@ def main():
         print("Beats seemingly not included.")
 
     if options.extended:
-        bad_tempo_samples = set.union(
-            set(bad_samples['tempo']['half_guessed']),
-            set(bad_samples['tempo']['completely_misspredicted']))
-        intersection = set.intersection(
-            set(bad_samples['beats']), 
-            set(bad_samples['onsets']), 
-            bad_tempo_samples) 
-        print(f"Samples on which all 3 estimations were poor (total: {len(intersection)}):")
-        for k in intersection:
-            print(k)
-        print('-'*20)
+        try:
+            bad_tempo_samples = set.union(
+                set(bad_samples['tempo']['half_guessed']),
+                set(bad_samples['tempo']['completely_misspredicted']))
+            intersection = set.intersection(
+                set(bad_samples['beats']), 
+                set(bad_samples['onsets']), 
+                bad_tempo_samples) 
+            print(f"Samples on which all 3 estimations were poor (total: {len(intersection)}):")
+            for k in intersection:
+                print(k)
+            print('-'*20)
+        except KeyError:
+            pass
 
 if __name__ == "__main__":
     main()

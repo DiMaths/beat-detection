@@ -142,18 +142,27 @@ def detect_everything(filename, options):
         for position in onsets:
             axes[1].axvline(position, color='tab:red')
         if options.training:
-            for position in GT[filename.stem]['onsets']:
-                axes[1].axvline(position, color='tab:green', linestyle='--')
+            try:
+                for position in GT[filename.stem]['onsets']:
+                    axes[1].axvline(position, color='tab:green', linestyle='--')
+            except KeyError:
+                pass
         title = 'beats (tempo: %r)' % list(np.round(tempo, 2))
         if options.training:
-            title += ' (ground truth tempo: %r)'  % list(np.round(GT[filename.stem]['tempo'], 2))
+            try:
+                title += ' (ground truth tempo: %r)'  % list(np.round(GT[filename.stem]['tempo'], 2))
+            except KeyError:
+                pass
         axes[2].set_title(title)
         axes[2].plot(np.arange(len(odf)) / odf_rate, odf)
         for position in beats:
             axes[2].axvline(position, color='tab:red')
         if options.training:
-            for position in GT[filename.stem]['beats']:
-                axes[2].axvline(position, color='tab:green', linestyle='--')
+            try:
+                for position in GT[filename.stem]['beats']:
+                    axes[2].axvline(position, color='tab:green', linestyle='--')
+            except KeyError:
+                pass
         plt.show()
 
     return {'onsets': list(np.round(onsets, 3)),
