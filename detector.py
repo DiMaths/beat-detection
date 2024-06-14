@@ -18,7 +18,7 @@ import numpy as np
 from scipy.io import wavfile
 import librosa
 
-import tqdm
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 from torch.utils.data import DataLoader
@@ -117,7 +117,7 @@ def detect_everything(filename, options):
 
     # compute onset detection function
     if options.method == 'melspect_cnn':
-        odf, odf_rate = detect_onsets_with_CNN(filename,options.model, fps, sample_rate)
+        odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate)
     else:
         odf, odf_rate = onset_detection_function(sample_rate, signal, fps, spect, magspect, melspect, options)
 
@@ -270,7 +270,7 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
-def detect_onsets_with_CNN(test,model_CNN, fps, sample_rate):
+def get_odf_with_CNN(test, model_CNN, fps, sample_rate):
     dataset_test = CNN_dataset([test],GT,test_tr = 1)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
     odf = []
