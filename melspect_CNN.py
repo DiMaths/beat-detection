@@ -165,7 +165,7 @@ def training_step(network, optimizer, data, targets, loss_fn):
     
 
 
-def get_metric(network, test_dataloader,loss_fn,threshold = 0.63):
+def print_eval(network, test_dataloader, loss_fn, threshold = 0.63) -> None:
     network.eval().to('cuda')
     running_loss = 0.
     accuracy = 0.
@@ -179,35 +179,32 @@ def get_metric(network, test_dataloader,loss_fn,threshold = 0.63):
         labels_processed = true_labels.flatten().float().reshape(-1,1)
         loss = loss_fn(output, labels_processed)
         running_loss += loss.item()
-
-        # for now I will impement it without hamming window as I am supposed
-        # but only with threshold
+        
         output = output.detach().cpu().numpy()
         output = (output>threshold).astype(int)
-        # output, _ = find_peaks(output,distance=4)
  
         labels_processed = labels_processed.detach().cpu().numpy()
-        # labels_processed, _ = find_peaks(labels_processed,distance=4)
         acc = accuracy_score(labels_processed, output)
         f1 = f1_score(labels_processed, output,average="weighted")
         f1_scores += f1
         accuracy += acc
         counter += 1
+    print('\n')
     print('Loss =', running_loss / counter)
     print('Accuracy = ', 100 * (accuracy / counter))
     print('F1_score = ', 100 * (f1_scores / counter))
+    print('\n\n\n')
 
 
-def training_loop(
+def train_model(
         network: torch.nn.Module,
         train_dataloader: torch.utils.data.dataloader.DataLoader,
         test_dataloader: torch.utils.data.dataloader.DataLoader,
         num_epochs: int,
-        show_progress: bool = True) -> tuple[list, list]:
+        show_progress: bool = True):
     
     loss_fn = nn.MSELoss()
-    device = "cuda"
-    device = torch.device(device)
+    device = torch.device("cuda")
 
     if not torch.cuda.is_available():
         print("CUDA IS NOT AVAILABLE")
@@ -215,21 +212,17 @@ def training_loop(
 
     print("Working on device",torch.cuda.get_device_name(0))
 
-    losses = []
-
-    optimizer = torch.optim.SGD(network.parameters(), lr=0.05,momentum=0.7)
+    
+    optimizer = torch.optim.SGD(network.parameters(), lr=0.05, momentum=0.7)
 
     for _ in tqdm(range(num_epochs), desc="Epoch", position=0, disable= (not show_progress)):
         network.train().to('cuda')
-        last_loss = 0.
         for _, data in tqdm(enumerate(train_dataloader), desc="Minibatch", position=1, leave=False, disable= (not show_progress)):
             inputs, targets = data
             inputs = inputs.to(device=device)
             targets = targets.to(device=device)
-            loss = training_step(network, optimizer, inputs, targets,loss_fn)
-        losses.append(last_loss)
-        print('\n')
-        get_metric(network, test_dataloader,loss_fn)
-        print('\n\n\n')
+            training_step(network, optimizer, inputs, targets, loss_fn)
+        
+        print_eval(network, test_dataloader, loss_fn)
             
-    return network, losses
+    return network

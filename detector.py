@@ -24,7 +24,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 
-from melspect_CNN import CNN_Model, CNN_dataset, training_loop
+from melspect_CNN import CNN_Model, CNN_dataset, train_model
 from central_avg_envlope import moving_central_average
 from spectral_diff import spectral_diff
 from util import sliding_max, sliding_min, relative_spikes
@@ -119,7 +119,13 @@ def detect_everything(filename, options):
     if options.method == 'melspect_cnn':
         odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate)
     else:
-        odf, odf_rate = onset_detection_function(sample_rate, signal, fps, spect, magspect, melspect, options)
+        odf, odf_rate = onset_detection_function(sample_rate, 
+                                                 signal, 
+                                                 fps, 
+                                                 spect, 
+                                                 magspect, 
+                                                 melspect, 
+                                                 options)
 
     # detect onsets from the onset detection function
     onsets = detect_onsets(odf_rate, odf, options)
@@ -322,7 +328,9 @@ def main():
         train_dataloader = DataLoader(dataset_train, batch_size=128, shuffle=True)
         test_dataloader = DataLoader(dataset_val, batch_size=128, shuffle=False)
 
-        options.model,_ = training_loop(options.model,train_dataloader,test_dataloader,5,True) # network
+        options.model = train_model(options.model, 
+                                    train_dataloader, 
+                                    test_dataloader, 5, True)
 
 
     if tqdm is not None:
