@@ -10,14 +10,14 @@ class CNN_Model(nn.Module):
     def __init__(self):
 
         super(CNN_Model, self).__init__()
-        self.conv1 = nn.Conv2d(3, 10, kernel_size=(3, 7))
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=(3,3))
-        self.fc1 = nn.Linear(1120, 256)
-        self.fc2 = nn.Linear(256, 120)
-        self.fc3 = nn.Linear(120, 1)
+        self.conv1 = nn.Conv2d(3, 12, kernel_size=(3, 7))
+        self.conv2 = nn.Conv2d(12, 24, kernel_size=(3,3))
+        self.fc1 = nn.Linear(24 * 8 * 7, 256)
+        self.fc2 = nn.Linear(256, 124)
+        self.fc3 = nn.Linear(124, 1)
         self.flat = nn.Flatten()
 
-    def forward(self, x, istraining=False, minibatch=64):
+    def forward(self, x, istraining=False):
 
         x = F.max_pool2d(F.relu(self.conv1(x)), (3, 1))
         x = F.max_pool2d(F.relu(self.conv2(x)), (3, 1))
