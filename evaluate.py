@@ -154,7 +154,7 @@ def eval_tempo(truth, preds, options):
         worst_estimates = dict()
         p_score_avg = np.mean(p_scores)
         for k in tempo_evals:
-            if tempo_evals[k][1] < p_score_avg and not tempo_evals[k][2]:
+            if tempo_evals[k][0] < p_score_avg and not tempo_evals[k][2]:
                     if tempo_evals[k][0] > 0:
                         bad_estimates[k] = tempo_evals[k]
                     else:
