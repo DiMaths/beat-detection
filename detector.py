@@ -77,6 +77,10 @@ Detects onsets, beats and tempo in WAV files.
                         type=int,
                         default=12,
                         help="Used for selecting odf peaks")
+    parser.add_argument('--spectrogram_fps',
+                        type=int,
+                        default=70,
+                        help="Number of spectral frames per second")
     parser.add_argument('--min_rel_jump',
                         type=float,
                         default=0.0,
@@ -100,7 +104,7 @@ def detect_everything(filename, options):
         signal = signal.mean(axis=-1)
 
     # compute spectrogram with given number of frames per second
-    fps = 100  # should be 70, I just temporaly replace it to be 100
+    fps = options.spectrogram_fps 
     hop_length = sample_rate // fps
     spect = librosa.stft(
         signal, n_fft=2048, hop_length=hop_length, window='hann')
@@ -117,11 +121,11 @@ def detect_everything(filename, options):
 
     # compute onset detection function
     if options.method == 'melspect_cnn':
-        odf, odf_rate = detect_onsets_with_CNN(filename,options.model,fps,sample_rate)
+        odf, odf_rate = detect_onsets_with_CNN(filename,options.model, fps, sample_rate)
     else:
         odf, odf_rate = onset_detection_function(sample_rate, signal, fps, spect, magspect, melspect, options)
 
-#    detect onsets from the onset detection function
+    # detect onsets from the onset detection function
     onsets = detect_onsets(odf_rate, odf, options)
 
     # detect tempo from everything we have
@@ -270,7 +274,7 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
-def detect_onsets_with_CNN(test,model_CNN,fps,sample_rate):
+def detect_onsets_with_CNN(test,model_CNN, fps, sample_rate):
     dataset_test = CNN_dataset([test],GT,test_tr = 1)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
     odf = []
@@ -316,8 +320,8 @@ def main():
         GT.update(dict_train)
 
         train, test = train_test_split(files_for_training, test_size=0.02) # python detector.py train/ output.json --plot_lvl 0 --training
-        dataset_train = CNN_dataset(train,GT)
-        dataset_val = CNN_dataset(test,GT)
+        dataset_train = CNN_dataset(train, GT, options)
+        dataset_val = CNN_dataset(test, GT, options)
 
         options.model = CNN_Model()
 

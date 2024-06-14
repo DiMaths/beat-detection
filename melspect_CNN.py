@@ -5,11 +5,8 @@ import numpy as np
 from scipy.io import wavfile
 from tqdm import tqdm
 import os
-import torch.nn.functional as F
-import sklearn
-import torch.nn as nn
 import librosa
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, f1_score
 
 
 class CNN_Model(nn.Module):
@@ -30,24 +27,19 @@ class CNN_Model(nn.Module):
         self.flat = nn.Flatten()
 
     def forward(self, x, istraining=False):
-
         x = F.max_pool2d(F.relu(self.conv1(x)), (3, 1))
         x = F.max_pool2d(F.relu(self.conv2(x)), (3, 1))
 
         x = F.dropout(self.flat(x),p=0.25,training=istraining)
 
-        # python detector.py train/ output.json --plot_lvl 0 --training
         # Fully connected layers with ReLU activations
-
         x = F.dropout(F.relu(self.fc1(x)),p=0.25,training=istraining)  # Output: (256)
-
         x =  F.dropout(F.relu(self.fc2(x)),p=0.25,training=istraining)  # Output: (120)
 
         # Sigmoid output layer
         x = self.fc3(x)  # Output: (1)
 
         x = torch.sigmoid(x)  # Output: (1)
-
         
         return x
     
@@ -60,17 +52,18 @@ class CNN_dataset(torch.utils.data.Dataset):
     By Jan Schlüter and Sebastian Böck
     @param infiles: list - list of files for
     @param GT: dict - ways to the files
-    @param test_tr: int - 0 - training, 1 - testing (no grounf truth)
+    @param is_training: bool - True - training, False - testing (no ground truth)
     """
-    def __init__(self,infiles,GT,test_tr = 0):
+    def __init__(self, infiles, GT, options):
         self.GT = GT
-        self.test_train = test_tr
+        self.is_training = options.training
+        self.spectrogram_fps = options.spectrogram_fps
         data_df = [np.zeros((3,80,7),dtype=float)] # padding of 7
-        if self.test_train == 0:
+        if self.is_training:
             labels_df = []
 
         for filename in tqdm(infiles):
-            if self.test_train == 0:
+            if self.is_training:
                 data, label = self.get_np_data(filename)
                 labels_df.append(label)
             else:
@@ -80,7 +73,7 @@ class CNN_dataset(torch.utils.data.Dataset):
         data_df.append(np.zeros((3,80,7),dtype=float)) # padding of 7
 
         self.data_df = np.concatenate(data_df,axis=2)
-        if self.test_train == 0: 
+        if self.is_training: 
             self.labels_df = np.concatenate(labels_df,axis=0).reshape(-1,1)
             print(self.labels_df.shape)
 
@@ -89,7 +82,7 @@ class CNN_dataset(torch.utils.data.Dataset):
         return self.data_df.shape[2]-14
 
     def __getitem__(self, idx: int):
-        if self.test_train == 0:
+        if self.is_training:
             label = torch.Tensor(self.labels_df[idx])
             item = torch.Tensor(self.data_df[:,:,idx:idx+15])
             return item, label
@@ -108,8 +101,7 @@ class CNN_dataset(torch.utils.data.Dataset):
         if signal.ndim == 2:
             signal = signal.mean(axis=-1)
 
-        fps_ = 100
-        hop_length_ = sample_rate // fps_
+        hop_length_ = sample_rate // self.spectrogram_fps
 
         base_name_with_extension = os.path.basename(filename)
         base_name = os.path.splitext(base_name_with_extension)[0]
@@ -134,8 +126,7 @@ class CNN_dataset(torch.utils.data.Dataset):
 
         melspects_3 = np.array(melspects_3)
 
-        if self.test_train == 0:
-            # ground truth ------------- #  ----------- # ------------ #
+        if self.is_training:
             onsets_ground_t = np.around((np.array(self.GT[base_name]["onsets"])*100)).astype(int)
 
             onsets_ground_t_3 = []
@@ -152,10 +143,6 @@ class CNN_dataset(torch.utils.data.Dataset):
 
             ground_truth_onsets = np.zeros(melspects_3.shape[2])
             ground_truth_onsets[onsets_ground_t_3] = 1
-            # ground truth ------------- #  ----------- # ------------ #
-
-            # plt.imshow(melspects_3[0], aspect='auto', cmap='viridis')
-            # plt.show()
 
             return melspects_3, ground_truth_onsets
         
@@ -202,7 +189,7 @@ def get_metric(network, test_dataloader,loss_fn,threshold = 0.63):
         labels_processed = labels_processed.detach().cpu().numpy()
         # labels_processed, _ = find_peaks(labels_processed,distance=4)
         acc = accuracy_score(labels_processed, output)
-        f1 = sklearn.metrics.f1_score(labels_processed, output,average="weighted")
+        f1 = f1_score(labels_processed, output,average="weighted")
         f1_scores += f1
         accuracy += acc
         counter += 1
