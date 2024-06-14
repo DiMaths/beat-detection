@@ -10,7 +10,6 @@ Author of the skeleton: Jan Schlüter
 Authors: Dmytro Borysenkov, Roman Chervinskyy
 """
 
-import sys
 from pathlib import Path
 from argparse import ArgumentParser
 import json
@@ -18,20 +17,17 @@ import json
 import numpy as np
 from scipy.io import wavfile
 import librosa
-import tqdm
-from torch.utils.data import DataLoader
-from melspect_CNN import CNN_Model
-from melspect_CNN import CNN_dataset
-from tqdm import tqdm
 
+import tqdm
 import matplotlib.pyplot as plt
 
+from torch.utils.data import DataLoader
+from sklearn.model_selection import train_test_split
+
+from melspect_CNN import CNN_Model, CNN_dataset, training_loop
 from central_avg_envlope import moving_central_average
 from spectral_diff import spectral_diff
 from util import sliding_max, sliding_min, relative_spikes
-from sklearn.model_selection import train_test_split
-from melspect_CNN import training_loop
-
 from evaluate import read_data
 
 def opts_parser():
@@ -56,7 +52,7 @@ Detects onsets, beats and tempo in WAV files.
     parser.add_argument('--method',
                         type=str,
                         default="spectral_diff",
-                        help="Specifies the method to uses")
+                        help="Specifies the method to uses: available 'spectral_diff', 'melspect_diff', 'central_avg_envelope' and 'melsepect_cnn'.")
     parser.add_argument('--avg_window_size',
                         type=int,
                         default=50,
@@ -290,8 +286,6 @@ def detect_onsets_with_CNN(test,model_CNN, fps, sample_rate):
     return odf, odf_rate
 
 
-
-
 def main():
     # parse command line
     parser = opts_parser()
@@ -319,7 +313,7 @@ def main():
         GT.update(dict_extra)
         GT.update(dict_train)
 
-        train, test = train_test_split(files_for_training, test_size=0.02) # python detector.py train/ output.json --plot_lvl 0 --training
+        train, test = train_test_split(files_for_training, test_size=0.02)
         dataset_train = CNN_dataset(train, GT, options)
         dataset_val = CNN_dataset(test, GT, options)
 
