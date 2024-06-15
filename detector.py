@@ -286,7 +286,7 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
 
 
 def get_odf_with_CNN(test, sample_rate, options):
-    dataset_test = CNN_dataset([test],GT,options,training=False)
+    dataset_test = CNN_dataset([test], GT, options, is_training=False)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
     odf = []
     for input in train_dataloader:
