@@ -117,7 +117,7 @@ def detect_everything(filename, options):
 
     # compute onset detection function
     if options.method == 'melspect_cnn':
-        odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate)
+        odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate,options)
     else:
         odf, odf_rate = onset_detection_function(sample_rate, 
                                                  signal, 
@@ -285,8 +285,8 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
-def get_odf_with_CNN(test, model_CNN, fps, sample_rate):
-    dataset_test = CNN_dataset([test],GT,test_tr = 1)
+def get_odf_with_CNN(test, model_CNN, fps, sample_rate,options):
+    dataset_test = CNN_dataset([test],GT,options,training=False)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
     odf = []
     for input in train_dataloader:
@@ -314,32 +314,34 @@ def main():
     infiles = list(indir.glob('*.wav'))
 
     if options.method == 'melspect_cnn':
+        options.spectrogram_fps = 100
+
         train_extra_dir = Path("train_extra/")
         files_extra_train = list(train_extra_dir.glob('*.wav'))
 
         train_dir = Path("train/")
         files_train = list(train_dir.glob('*.wav'))
 
-        files_for_training = files_train + files_extra_train
+        files_for_training = files_train # + files_extra_train
 
 
         dict_extra = read_data(train_extra_dir)
         dict_train = read_data(train_dir)
         GT.update(dict_extra)
-        GT.update(dict_train)
+        # GT.update(dict_train)
 
-        train, test = train_test_split(files_for_training, test_size=0.02)
+        train, test = train_test_split(files_for_training, test_size=0.05)
         dataset_train = CNN_dataset(train, GT, options)
         dataset_val = CNN_dataset(test, GT, options)
 
         options.model = CNN_Model()
 
-        train_dataloader = DataLoader(dataset_train, batch_size=128, shuffle=True)
-        test_dataloader = DataLoader(dataset_val, batch_size=128, shuffle=False)
+        train_dataloader = DataLoader(dataset_train, batch_size=80, shuffle=True)
+        test_dataloader = DataLoader(dataset_val, batch_size=80, shuffle=False)
 
         options.model = train_model(options.model, 
                                     train_dataloader, 
-                                    test_dataloader, 5, True)
+                                    test_dataloader, 10, True)
 
 
     if tqdm is not None:

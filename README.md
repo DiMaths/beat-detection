@@ -18,7 +18,7 @@ if > 0, then visualizes computed features and predictions for each file as they 
 if > 1, produces extra plots of odf and its peaks (aka onsets) selection process.
 
 `--method` takes str value
-Possible methods are 'central_avg_envelope' and 'spectral_diff'(default value), 'melspect_diff', 'melsepect_cnn'.
+Possible methods are 'central_avg_envelope' and 'spectral_diff'(default value), 'melspect_diff', 'malspect_cnn'.
 
 For details on other options run `./detector.py --help`.
 
