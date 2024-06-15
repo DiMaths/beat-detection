@@ -52,11 +52,10 @@ class CNN_dataset(torch.utils.data.Dataset):
     By Jan Schlüter and Sebastian Böck
     @param infiles: list - list of files for
     @param GT: dict - ways to the files
-    @param is_training: bool - True - training, False - testing (no ground truth)
     """
-    def __init__(self, infiles, GT, options, training = True):
+    def __init__(self, infiles, GT, options):
         self.GT = GT
-        self.is_training = training
+        self.is_training = options.training
         self.spectrogram_fps = options.spectrogram_fps
         data_df = [np.zeros((3,80,7),dtype=float)] # padding of 7
         if self.is_training:

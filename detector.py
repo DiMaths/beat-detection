@@ -117,7 +117,7 @@ def detect_everything(filename, options):
 
     # compute onset detection function
     if options.method == 'melspect_cnn':
-        odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate,options)
+        odf, odf_rate = get_odf_with_CNN(filename, sample_rate, options)
     else:
         odf, odf_rate = onset_detection_function(sample_rate, 
                                                  signal, 
@@ -285,18 +285,18 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
-def get_odf_with_CNN(test, model_CNN, fps, sample_rate,options):
+def get_odf_with_CNN(test, sample_rate, options):
     dataset_test = CNN_dataset([test],GT,options,training=False)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
     odf = []
     for input in train_dataloader:
         input = input.to('cuda')
-        output = model_CNN(input,istraining=False)
+        output = options.model(input,istraining=False)
         output = output.detach().cpu().numpy()
         odf.append(output)
 
     odf = np.concatenate(odf,axis=0).reshape(-1)
-    odf_rate = sample_rate / (sample_rate // fps)
+    odf_rate = sample_rate / (sample_rate // options.spectrogram_fps)
 
     return odf, odf_rate
 
@@ -314,7 +314,6 @@ def main():
     infiles = list(indir.glob('*.wav'))
 
     if options.method == 'melspect_cnn':
-        options.spectrogram_fps = 100
 
         train_extra_dir = Path("train_extra/")
         files_extra_train = list(train_extra_dir.glob('*.wav'))
