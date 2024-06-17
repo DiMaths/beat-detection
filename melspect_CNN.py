@@ -6,7 +6,7 @@ from scipy.io import wavfile
 from tqdm import tqdm
 import os
 import librosa
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, f1_score, recall_score
 
 
 class CNN_Model(nn.Module):
@@ -54,9 +54,9 @@ class CNN_dataset(torch.utils.data.Dataset):
     @param GT: dict - ways to the files
     @param is_training: bool - True - training, False - testing (no ground truth)
     """
-    def __init__(self, infiles, GT, options):
+    def __init__(self, infiles, GT, options, is_training = True):
         self.GT = GT
-        self.is_training = options.training
+        self.is_training = is_training
         self.spectrogram_fps = options.spectrogram_fps
         data_df = [np.zeros((3,80,7),dtype=float)] # padding of 7
         if self.is_training:
@@ -75,7 +75,6 @@ class CNN_dataset(torch.utils.data.Dataset):
         self.data_df = np.concatenate(data_df,axis=2)
         if self.is_training: 
             self.labels_df = np.concatenate(labels_df,axis=0).reshape(-1,1)
-            print(self.labels_df.shape)
 
 
     def __len__(self):
@@ -129,20 +128,21 @@ class CNN_dataset(torch.utils.data.Dataset):
         if self.is_training:
             onsets_ground_t = np.around((np.array(self.GT[base_name]["onsets"])*100)).astype(int)
 
-            onsets_ground_t_3 = []
-            for i in onsets_ground_t:
-                onsets_ground_t_3.append(i-1)
-                onsets_ground_t_3.append(i)
-                onsets_ground_t_3.append(i+1)
-
             # basic deletion of 1st and last element
-            if onsets_ground_t_3[0] < 1:
-                onsets_ground_t_3 = onsets_ground_t_3[1:]
-            if onsets_ground_t_3[-1] > melspects_3.shape[2]-1:
-                onsets_ground_t_3 = onsets_ground_t_3[:-1]
+            if onsets_ground_t[0] < 1:
+                onsets_ground_t = onsets_ground_t[1:]
+            if onsets_ground_t[-1] > melspects_3.shape[2]-1:
+                onsets_ground_t = onsets_ground_t[:-1]
 
             ground_truth_onsets = np.zeros(melspects_3.shape[2])
-            ground_truth_onsets[onsets_ground_t_3] = 1
+            ground_truth_onsets[onsets_ground_t] = 1
+
+            for i in range(0,melspects_3.shape[2]-1):
+                if ground_truth_onsets[i] == 1:
+                    # working under assumption that onset is not fisrt or last element
+                    # and that there cannot be 2 frames with onsets in a row
+                    ground_truth_onsets[i-1] = 0.25
+                    ground_truth_onsets[i+1] = 0.25
 
             return melspects_3, ground_truth_onsets
         
@@ -165,16 +165,17 @@ def training_step(network, optimizer, data, targets, loss_fn):
     
 
 
-def print_eval(network, test_dataloader, loss_fn, threshold = 0.63) -> None:
-    network.eval().to('cuda')
+def print_eval(network, test_dataloader, loss_fn, threshold = 0.60, device = None) -> None:
+    network.eval().to(device)
     running_loss = 0.
     accuracy = 0.
     counter = 0
+    recall = 0.
     f1_scores = 0.
     for i, data in tqdm(enumerate(test_dataloader)):
         input, true_labels = data
-        input = input.to('cuda')
-        true_labels = true_labels.to('cuda')
+        input = input.to(device)
+        true_labels = true_labels.to(device)
         output = network(input,istraining=False)
         labels_processed = true_labels.flatten().float().reshape(-1,1)
         loss = loss_fn(output, labels_processed)
@@ -184,15 +185,19 @@ def print_eval(network, test_dataloader, loss_fn, threshold = 0.63) -> None:
         output = (output>threshold).astype(int)
  
         labels_processed = labels_processed.detach().cpu().numpy()
+        labels_processed = (labels_processed>threshold).astype(int)
         acc = accuracy_score(labels_processed, output)
         f1 = f1_score(labels_processed, output,average="weighted")
+        recall_c = recall_score(labels_processed, output,average="weighted")
         f1_scores += f1
         accuracy += acc
+        recall += recall_c
         counter += 1
     print('\n')
     print('Loss =', running_loss / counter)
     print('Accuracy = ', 100 * (accuracy / counter))
     print('F1_score = ', 100 * (f1_scores / counter))
+    print('Recall = ', 100 * (recall / counter))
     print('\n\n\n')
 
 
@@ -203,20 +208,23 @@ def train_model(
         num_epochs: int,
         show_progress: bool = True):
     
+    torch.manual_seed(0)
+    
     loss_fn = nn.MSELoss()
-    device = torch.device("cuda")
-
+    
+    device = None
     if not torch.cuda.is_available():
         print("CUDA IS NOT AVAILABLE")
         device = torch.device("cpu")
-
-    print("Working on device",torch.cuda.get_device_name(0))
+    else:
+        device = torch.device("cuda")
+        print("Working on device",torch.cuda.get_device_name(0))
 
     
-    optimizer = torch.optim.SGD(network.parameters(), lr=0.05, momentum=0.7)
+    optimizer = torch.optim.SGD(network.parameters(), lr=0.04, momentum=0.75)
 
     for _ in tqdm(range(num_epochs), desc="Epoch", position=0, disable= (not show_progress)):
-        network.train().to('cuda')
+        network.train().to(device)
         for _, data in tqdm(enumerate(train_dataloader), desc="Minibatch", position=1, leave=False, disable= (not show_progress)):
             inputs, targets = data
             inputs = inputs.to(device=device)

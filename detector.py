@@ -13,6 +13,7 @@ Authors: Dmytro Borysenkov, Roman Chervinskyy
 from pathlib import Path
 from argparse import ArgumentParser
 import json
+import torch
 
 import numpy as np
 from scipy.io import wavfile
@@ -117,7 +118,7 @@ def detect_everything(filename, options):
 
     # compute onset detection function
     if options.method == 'melspect_cnn':
-        odf, odf_rate = get_odf_with_CNN(filename, options.model, fps, sample_rate)
+        odf, odf_rate = get_odf_with_CNN(filename, sample_rate, options)
     else:
         odf, odf_rate = onset_detection_function(sample_rate, 
                                                  signal, 
@@ -192,6 +193,7 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     rate in values per second as a tuple: (values, values_per_second)
     """
     subsampling_factor = 1
+    values = None
     if options.method == "central_avg_envelope":
         subsampling_factor = options.avg_window_size
         values = moving_central_average(np.abs(signal),
@@ -201,9 +203,11 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     elif options.method == "spectral_diff":
         subsampling_factor = sample_rate // fps 
         values = spectral_diff(spect, options.p_norm, options.positive_only)
+
     elif options.method == "melspect_diff":
         subsampling_factor = sample_rate // fps
         values = spectral_diff(melspect, options.p_norm, options.positive_only, melscaled=True)
+
     values_per_second = sample_rate / subsampling_factor
     return values, values_per_second
 
@@ -285,18 +289,18 @@ def detect_beats(sample_rate, signal, fps, spect, magspect, melspect,
     return beats
 
 
-def get_odf_with_CNN(test, model_CNN, fps, sample_rate):
-    dataset_test = CNN_dataset([test],GT,test_tr = 1)
+def get_odf_with_CNN(test, sample_rate, options):
+    dataset_test = CNN_dataset([test], GT, options, is_training=False)
     train_dataloader = DataLoader(dataset_test, batch_size=128, shuffle=True)
     odf = []
     for input in train_dataloader:
         input = input.to('cuda')
-        output = model_CNN(input,istraining=False)
+        output = options.model(input,istraining=False)
         output = output.detach().cpu().numpy()
         odf.append(output)
 
     odf = np.concatenate(odf,axis=0).reshape(-1)
-    odf_rate = sample_rate / (sample_rate // fps)
+    odf_rate = sample_rate / (sample_rate // options.spectrogram_fps)
 
     return odf, odf_rate
 
@@ -314,6 +318,9 @@ def main():
     infiles = list(indir.glob('*.wav'))
 
     if options.method == 'melspect_cnn':
+        options.spectrogram_fps = 100
+        torch.manual_seed(0)
+
         train_extra_dir = Path("train_extra/")
         files_extra_train = list(train_extra_dir.glob('*.wav'))
 
@@ -325,21 +332,22 @@ def main():
 
         dict_extra = read_data(train_extra_dir)
         dict_train = read_data(train_dir)
+        
         GT.update(dict_extra)
         GT.update(dict_train)
 
-        train, test = train_test_split(files_for_training, test_size=0.02)
+        train, test = train_test_split(files_for_training, test_size=0.05)
         dataset_train = CNN_dataset(train, GT, options)
         dataset_val = CNN_dataset(test, GT, options)
 
         options.model = CNN_Model()
 
-        train_dataloader = DataLoader(dataset_train, batch_size=128, shuffle=True)
-        test_dataloader = DataLoader(dataset_val, batch_size=128, shuffle=False)
+        train_dataloader = DataLoader(dataset_train, batch_size=80, shuffle=True)
+        test_dataloader = DataLoader(dataset_val, batch_size=80, shuffle=False)
 
         options.model = train_model(options.model, 
                                     train_dataloader, 
-                                    test_dataloader, 5, True)
+                                    test_dataloader, 10, True)
 
 
     if tqdm is not None:
