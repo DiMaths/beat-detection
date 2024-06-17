@@ -75,7 +75,6 @@ class CNN_dataset(torch.utils.data.Dataset):
         self.data_df = np.concatenate(data_df,axis=2)
         if self.is_training: 
             self.labels_df = np.concatenate(labels_df,axis=0).reshape(-1,1)
-            print(self.labels_df.shape)
 
 
     def __len__(self):
@@ -166,14 +165,8 @@ def training_step(network, optimizer, data, targets, loss_fn):
     
 
 
-def print_eval(network, test_dataloader, loss_fn, threshold = 0.60) -> None:
-    device = None
-    if not torch.cuda.is_available():
-        print("CUDA IS NOT AVAILABLE")
-        device = torch.device("cpu")
-    else:
-        device = torch.device("cuda")
-    network.eval().to('cuda')
+def print_eval(network, test_dataloader, loss_fn, threshold = 0.60, device = None) -> None:
+    network.eval().to(device)
     running_loss = 0.
     accuracy = 0.
     counter = 0
@@ -225,14 +218,13 @@ def train_model(
         device = torch.device("cpu")
     else:
         device = torch.device("cuda")
-
-    print("Working on device",torch.cuda.get_device_name(0))
+        print("Working on device",torch.cuda.get_device_name(0))
 
     
     optimizer = torch.optim.SGD(network.parameters(), lr=0.04, momentum=0.75)
 
     for _ in tqdm(range(num_epochs), desc="Epoch", position=0, disable= (not show_progress)):
-        network.train().to('cuda')
+        network.train().to(device)
         for _, data in tqdm(enumerate(train_dataloader), desc="Minibatch", position=1, leave=False, disable= (not show_progress)):
             inputs, targets = data
             inputs = inputs.to(device=device)
