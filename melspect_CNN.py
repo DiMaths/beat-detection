@@ -167,6 +167,12 @@ def training_step(network, optimizer, data, targets, loss_fn):
 
 
 def print_eval(network, test_dataloader, loss_fn, threshold = 0.60) -> None:
+    device = None
+    if not torch.cuda.is_available():
+        print("CUDA IS NOT AVAILABLE")
+        device = torch.device("cpu")
+    else:
+        device = torch.device("cuda")
     network.eval().to('cuda')
     running_loss = 0.
     accuracy = 0.
@@ -175,8 +181,8 @@ def print_eval(network, test_dataloader, loss_fn, threshold = 0.60) -> None:
     f1_scores = 0.
     for i, data in tqdm(enumerate(test_dataloader)):
         input, true_labels = data
-        input = input.to('cuda')
-        true_labels = true_labels.to('cuda')
+        input = input.to(device)
+        true_labels = true_labels.to(device)
         output = network(input,istraining=False)
         labels_processed = true_labels.flatten().float().reshape(-1,1)
         loss = loss_fn(output, labels_processed)
@@ -209,12 +215,16 @@ def train_model(
         num_epochs: int,
         show_progress: bool = True):
     
+    torch.manual_seed(0)
+    
     loss_fn = nn.MSELoss()
-    device = torch.device("cuda")
-
+    
+    device = None
     if not torch.cuda.is_available():
         print("CUDA IS NOT AVAILABLE")
         device = torch.device("cpu")
+    else:
+        device = torch.device("cuda")
 
     print("Working on device",torch.cuda.get_device_name(0))
 

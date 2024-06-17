@@ -13,6 +13,7 @@ Authors: Dmytro Borysenkov, Roman Chervinskyy
 from pathlib import Path
 from argparse import ArgumentParser
 import json
+import torch
 
 import numpy as np
 from scipy.io import wavfile
@@ -192,6 +193,7 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     rate in values per second as a tuple: (values, values_per_second)
     """
     subsampling_factor = 1
+    values = None
     if options.method == "central_avg_envelope":
         subsampling_factor = options.avg_window_size
         values = moving_central_average(np.abs(signal),
@@ -201,9 +203,11 @@ def onset_detection_function(sample_rate, signal, fps, spect, magspect,
     elif options.method == "spectral_diff":
         subsampling_factor = sample_rate // fps 
         values = spectral_diff(spect, options.p_norm, options.positive_only)
+
     elif options.method == "melspect_diff":
         subsampling_factor = sample_rate // fps
         values = spectral_diff(melspect, options.p_norm, options.positive_only, melscaled=True)
+
     values_per_second = sample_rate / subsampling_factor
     return values, values_per_second
 
@@ -314,6 +318,8 @@ def main():
     infiles = list(indir.glob('*.wav'))
 
     if options.method == 'melspect_cnn':
+        options.spectrogram_fps = 100
+        torch.manual_seed(0)
 
         train_extra_dir = Path("train_extra/")
         files_extra_train = list(train_extra_dir.glob('*.wav'))
@@ -321,13 +327,14 @@ def main():
         train_dir = Path("train/")
         files_train = list(train_dir.glob('*.wav'))
 
-        files_for_training = files_train # + files_extra_train
+        files_for_training = files_train + files_extra_train
 
 
         dict_extra = read_data(train_extra_dir)
         dict_train = read_data(train_dir)
+        
         GT.update(dict_extra)
-        # GT.update(dict_train)
+        GT.update(dict_train)
 
         train, test = train_test_split(files_for_training, test_size=0.05)
         dataset_train = CNN_dataset(train, GT, options)
